@@ -3,6 +3,7 @@
  * 通过 wx / canvas 桩验证：模块加载、触摸交互（选中→倒水→撤回）、绘制主路径不抛错
  */
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 
 // ---------- 桩（stub） ----------
 const noop = () => {};
@@ -23,6 +24,26 @@ const ctxStub = new Proxy(
 );
 const canvasStub = { width: 0, height: 0, getContext: () => ctxStub };
 
+// WebAudio 桩（音效模块用）
+const audioNodeStub = () => ({
+  connect: noop,
+  start: noop,
+  stop: noop,
+  frequency: { value: 0 },
+  gain: { value: 0, setValueAtTime: noop, exponentialRampToValueAtTime: noop },
+  buffer: null,
+});
+const webAudioStub = {
+  currentTime: 0,
+  sampleRate: 44100,
+  destination: {},
+  createOscillator: audioNodeStub,
+  createGain: audioNodeStub,
+  createBufferSource: audioNodeStub,
+  createBiquadFilter: audioNodeStub,
+  createBuffer: () => ({ getChannelData: () => new Float32Array(100) }),
+};
+
 globalThis.wx = {
   createCanvas: () => canvasStub,
   getSystemInfoSync: () => ({ screenWidth: 375, screenHeight: 812, pixelRatio: 2 }),
@@ -31,6 +52,22 @@ globalThis.wx = {
   },
   setStorageSync: noop,
   getStorageSync: () => '',
+  removeStorageSync: noop,
+  createWebAudioContext: () => webAudioStub,
+  // 胶囊按钮位置（顶部安全区计算用）
+  getMenuButtonBoundingClientRect: () => ({
+    top: 24,
+    bottom: 56,
+    height: 32,
+    left: 281,
+    right: 368,
+    width: 87,
+  }),
+  // 模拟代码包文件读取（assets/config/ 下的 .jsonc 配置）
+  getFileSystemManager: () => ({
+    readFileSync: (path) =>
+      readFileSync(new URL(`../${path}`, import.meta.url), 'utf8'),
+  }),
 };
 globalThis.requestAnimationFrame = () => 1; // 不实际循环，由测试手动驱动 tick
 
@@ -54,7 +91,24 @@ function check(name, fn) {
   }
 }
 
-check('模块加载 + 关卡载入 + 布局生成', () => {
+check('初始进入菜单场景，菜单绘制不抛错', () => {
+  assert.strictEqual(main.scene, 'menu');
+  main.tick();
+});
+
+check('点击开始 → 关卡选择页（第 1 关可挑战，后续锁定）', () => {
+  tap(renderer.menuPlayBtn.x + renderer.menuPlayBtn.w / 2, renderer.menuPlayBtn.y + renderer.menuPlayBtn.h / 2);
+  assert.strictEqual(main.scene, 'levelSelect');
+  main.tick(); // 绘制关卡选择页不抛错
+  assert.strictEqual(renderer.levelBtns.length, 10);
+  // 未解锁关卡点击无效
+  tap(renderer.levelBtns[1].x + 5, renderer.levelBtns[1].y + 5);
+  assert.strictEqual(main.scene, 'levelSelect', '未解锁关卡不应进入');
+});
+
+check('选择第 1 关 → 进入游戏，关卡载入 + 布局生成', () => {
+  tap(renderer.levelBtns[0].x + 5, renderer.levelBtns[0].y + 5);
+  assert.strictEqual(main.scene, 'game');
   assert.ok(logic.bottles.length > 0);
   assert.strictEqual(renderer.bottleRects.length, logic.bottles.length);
 });
@@ -142,6 +196,69 @@ check('重开按钮：关卡重置', () => {
   assert.strictEqual(main.selected, -1);
 });
 
+check('道具：打乱 → 液体重排、层集合不变、次数用尽后无效', () => {
+  const before = JSON.stringify(logic.bottles);
+  const flat = (bs) =>
+    bs
+      .flat()
+      .map((c) => (c >= 0 ? c : -c - 1))
+      .sort()
+      .join(',');
+  tap(renderer.shuffleBtn.x, renderer.shuffleBtn.y);
+  assert.strictEqual(main.props.shuffle, 0, '打乱次数应扣减');
+  assert.notStrictEqual(JSON.stringify(logic.bottles), before, '局面应重排');
+  assert.strictEqual(flat(logic.bottles), flat(JSON.parse(before)), '层集合应不变');
+  main.tick(); // 绘制不抛错
+  const after = JSON.stringify(logic.bottles);
+  tap(renderer.shuffleBtn.x, renderer.shuffleBtn.y);
+  assert.strictEqual(JSON.stringify(logic.bottles), after, '次数用尽应无效');
+  main.adConfirm = null; // 清理：用尽点击会弹广告确认浮层，后续测试单独覆盖
+});
+
+check('道具：加瓶 → 空瓶 +1、布局刷新、次数用尽后无效', () => {
+  const n = logic.bottles.length;
+  tap(renderer.addBottleBtn.x, renderer.addBottleBtn.y);
+  assert.strictEqual(logic.bottles.length, n + 1);
+  assert.strictEqual(renderer.bottleRects.length, n + 1, '布局应随瓶数刷新');
+  assert.deepStrictEqual(logic.bottles[n], [], '新增瓶应为空');
+  main.tick();
+  tap(renderer.addBottleBtn.x, renderer.addBottleBtn.y);
+  assert.strictEqual(logic.bottles.length, n + 1, '次数用尽应无效');
+  main.adConfirm = null; // 清理：用尽点击会弹广告确认浮层，后续测试单独覆盖
+});
+
+check('广告补给：道具用尽 → 确认浮层 → 看广告（开发模式直接发放）', () => {
+  // 此时打乱/加瓶均已用尽（前两项测试各用掉 1 次）
+  assert.strictEqual(main.props.shuffle, 0);
+  assert.strictEqual(main.props.addBottle, 0);
+
+  // 点击用尽的打乱按钮 → 弹广告确认浮层（不再直接无效）
+  tap(renderer.shuffleBtn.x, renderer.shuffleBtn.y);
+  assert.strictEqual(main.adConfirm, 'shuffle', '应弹出广告确认浮层');
+  main.tick(); // 绘制浮层不抛错
+
+  // 取消
+  tap(renderer.adConfirmCancelBtn.x + 5, renderer.adConfirmCancelBtn.y + 5);
+  assert.strictEqual(main.adConfirm, null);
+  assert.strictEqual(main.props.shuffle, 0, '取消不应补充');
+
+  // 再点 → 看广告 → 开发模式（无 adUnitId）直接发放
+  tap(renderer.shuffleBtn.x, renderer.shuffleBtn.y);
+  tap(renderer.adConfirmWatchBtn.x + 5, renderer.adConfirmWatchBtn.y + 5);
+  assert.strictEqual(main.adConfirm, null);
+  assert.strictEqual(main.props.shuffle, 1, '看广告后应补充 1 次');
+  assert.ok(renderer.toast, '应显示补充提示');
+});
+
+check('第 4 关（含问号隐藏层）渲染不抛错', () => {
+  main.loadLevel(3);
+  assert.ok(logic.bottles.some((b) => b.some((c) => c < 0)), '第 4 关应有隐藏层');
+  main.tick();
+  main.selected = 0;
+  main.tick();
+  main.selected = -1;
+});
+
 check('完整通关流程：走完一关 → 胜利面板 → 下一关', () => {
   main.loadLevel(0);
   // DFS 求解（直接用逻辑层 API；本测试关注的是胜利面板与关卡切换流程）
@@ -175,7 +292,56 @@ check('完整通关流程：走完一关 → 胜利面板 → 下一关', () => 
   // 点击「下一关」
   tap(renderer.nextBtn.x + renderer.nextBtn.w / 2, renderer.nextBtn.y + renderer.nextBtn.h / 2);
   assert.strictEqual(main.levelIndex, 1, '应进入第 2 关');
+  assert.strictEqual(main.cleared, 1, '通关第 1 关后解锁进度应为 1');
   assert.strictEqual(logic.moveCount, 0, '新关步数应清零');
+});
+
+check('左上角返回按钮 → 暂停浮层（继续 / 退出）', () => {
+  tap(renderer.backBtn.x, renderer.backBtn.y);
+  assert.ok(main.pauseOverlay, '应弹出暂停浮层');
+  main.tick(); // 绘制浮层不抛错
+  // 浮层期间点击瓶子无效
+  tap(200, 500);
+  assert.strictEqual(logic.moveCount, 0);
+  // 继续游戏
+  tap(renderer.pauseResumeBtn.x + 5, renderer.pauseResumeBtn.y + 5);
+  assert.ok(!main.pauseOverlay);
+});
+
+check('退出 → 返回开始菜单（进度保留）→ 设置 → 重置进度 → 重新开始', () => {
+  tap(renderer.backBtn.x, renderer.backBtn.y);
+  tap(renderer.pauseExitBtn.x + 5, renderer.pauseExitBtn.y + 5);
+  assert.strictEqual(main.scene, 'menu', '应返回开始菜单');
+  assert.strictEqual(main.levelIndex, 1, '进度应保留');
+  main.tick(); // 菜单绘制不抛错
+
+  // 设置页
+  tap(renderer.menuSettingsBtn.x + 5, renderer.menuSettingsBtn.y + 5);
+  assert.strictEqual(main.scene, 'settings');
+  main.tick(); // 设置页绘制不抛错
+
+  // 音效开关切换（默认开 → 关 → 开）
+  assert.strictEqual(main.soundOn, true);
+  tap(renderer.settingsSoundToggle.x + 5, renderer.settingsSoundToggle.y + 5);
+  assert.strictEqual(main.soundOn, false);
+  main.tick(); // 绘制开关状态不抛错
+  tap(renderer.settingsSoundToggle.x + 5, renderer.settingsSoundToggle.y + 5);
+  assert.strictEqual(main.soundOn, true);
+
+  tap(renderer.settingsResetBtn.x + 5, renderer.settingsResetBtn.y + 5);
+  assert.strictEqual(main.cleared, 0, '重置后解锁进度应为 0');
+  assert.ok(renderer.toast, '应显示重置提示');
+
+  // 返回菜单 → 开始 → 关卡选择 → 第 1 关
+  tap(renderer.backBtn.x, renderer.backBtn.y);
+  assert.strictEqual(main.scene, 'menu');
+  tap(renderer.menuPlayBtn.x + 5, renderer.menuPlayBtn.y + 5);
+  assert.strictEqual(main.scene, 'levelSelect');
+  tap(renderer.levelBtns[0].x + 5, renderer.levelBtns[0].y + 5);
+  assert.strictEqual(main.scene, 'game');
+  assert.strictEqual(main.levelIndex, 0);
+  assert.strictEqual(main.cleared, 0, '重置后解锁进度应为 0');
+  assert.strictEqual(logic.moveCount, 0);
 });
 
 console.log(`\n结果: ${failed === 0 ? '全部通过' : failed + ' 项失败'}`);

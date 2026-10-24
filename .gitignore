@@ -2,6 +2,7 @@
 .codebuddy
 **/raw/*
 __pycache__
+node_modules
 
 # docs 整体不上传，仅豁免通用规范 docs/specs/
 docs/*

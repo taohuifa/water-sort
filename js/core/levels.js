@@ -17,19 +17,72 @@ export const COLORS = [
 ];
 
 /**
- * 10 关难度曲线（对应方案 8.4 阶段二「手工配置 10 关」）：
- * colors = 颜色数；empties = 初始空瓶数；总瓶数 = colors + empties
- * 同一 seed 局面固定，可复现
+ * 解析 .jsonc 配置文本（JSON with Comments）：
+ * 剥离行注释与块注释后交给 JSON.parse，字符串字面量内的注释符号不误伤。
+ * 用于加载 assets/config/ 下的关卡配置。
  */
-export const LEVELS = [
-  { colors: 2, empties: 2, seed: 101 }, // 第 1 关：4 瓶，教学
-  { colors: 3, empties: 2, seed: 102 }, // 第 2 关：5 瓶
-  { colors: 3, empties: 2, seed: 103 }, // 第 3 关：5 瓶
-  { colors: 4, empties: 2, seed: 104 }, // 第 4 关：6 瓶
-  { colors: 4, empties: 2, seed: 105 }, // 第 5 关：6 瓶
-  { colors: 5, empties: 2, seed: 106 }, // 第 6 关：7 瓶
-  { colors: 5, empties: 3, seed: 107 }, // 第 7 关：8 瓶
-  { colors: 6, empties: 3, seed: 108 }, // 第 8 关：9 瓶
-  { colors: 6, empties: 3, seed: 109 }, // 第 9 关：9 瓶
-  { colors: 7, empties: 3, seed: 110 }, // 第 10 关：10 瓶
-];
+export function parseJsonc(text) {
+  let out = '';
+  let i = 0;
+  const n = text.length;
+  let inString = false;
+  while (i < n) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (ch === '\\') {
+        out += text[i + 1] || '';
+        i += 2;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      i++;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '/') {
+      while (i < n && text[i] !== '\n') i++;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      i += 2;
+      while (i < n && !(text[i] === '*' && text[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    out += ch;
+    i++;
+  }
+  return JSON.parse(out);
+}
+
+/**
+ * 按难度曲线配置生成关卡列表。
+ * 配置存放在 assets/config/levels.jsonc（.jsonc：带注释的 JSON），
+ * 由入口（js/main.js）或测试读取文件文本并 parseJsonc 后传入本函数，
+ * 逻辑层不直接读文件。
+ *
+ * 生成规则：
+ * - 颜色数每 2 关 +1（2,3,3,4,4,5,5,6,6,7...），封顶 maxColors
+ * - 空瓶数：baseEmpties，自 extraEmptyFromLevel 关起 +1
+ * - 问号隐藏层：第 hiddenFromLevel 关起每 2 关 +1，封顶 hiddenMax（1,1,2,2,3,3...）
+ */
+export function buildLevelsFromConfig(curve) {
+  const levels = [];
+  for (let i = 0; i < curve.levelCount; i++) {
+    const level = i + 1;
+    const colors = Math.min(curve.maxColors, curve.startColors + Math.floor(level / 2));
+    const empties = curve.baseEmpties + (level >= curve.extraEmptyFromLevel ? 1 : 0);
+    const hiddenCount =
+      level >= curve.hiddenFromLevel
+        ? Math.min(curve.hiddenMax, Math.floor((level - curve.hiddenFromLevel) / 2) + 1)
+        : 0;
+    levels.push({ level, colors, empties, hiddenCount, seed: curve.seedBase + level });
+  }
+  return levels;
+}

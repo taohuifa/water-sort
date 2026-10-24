@@ -21,9 +21,11 @@ export default class GameLogic {
   }
 
   /** 载入关卡（同 seed 局面完全一致，可复现） */
-  loadLevel({ colors, empties, seed }) {
+  loadLevel({ colors, empties, seed, hiddenCount = 0 }) {
     this.colorCount = colors;
     this.bottles = this._generate(colors, empties, seed);
+    if (hiddenCount > 0) this._markHidden(hiddenCount, seed * 31 + 7);
+    this._revealTops();
     this.completed = [];
     this.undoStack = [];
     this.moveCount = 0;
@@ -157,6 +159,7 @@ export default class GameLogic {
   /**
    * 执行倒水：把源瓶顶层同色连续段整体倒入目标瓶。
    * 目标瓶凑满纯色 → 判定完成：颜色记入货架，瓶子清空（腾出空瓶资源，方案 2.4）。
+   * 源瓶露出隐藏层 → 立即揭示真实颜色（方案 3「?」层机制）。
    * @returns {null | {amount, color, completedColor}} completedColor >= 0 表示本次完成一瓶
    */
   pour(from, to) {
@@ -166,6 +169,7 @@ export default class GameLogic {
     const f = this.bottles[from];
     const t = this.bottles[to];
     const record = {
+      type: 'pour',
       from,
       to,
       fromContent: f.slice(),
@@ -174,6 +178,7 @@ export default class GameLogic {
     };
     const color = f[f.length - 1];
     for (let i = 0; i < amount; i++) t.push(f.pop());
+    this._revealTop(f); // 倒出后源瓶若露出「?」层则揭示
 
     let completedColor = -1;
     if (this._isFullMono(t)) {
@@ -186,15 +191,107 @@ export default class GameLogic {
     return { amount, color, completedColor };
   }
 
-  /** 撤回上一步（含完成效果的撤销），恢复到该步之前的状态 */
+  /** 撤回上一步（倒水 / 打乱 / 加瓶，按栈序恢复到该步之前的状态） */
   undo() {
     const r = this.undoStack.pop();
     if (!r) return false;
-    this.bottles[r.from] = r.fromContent;
-    this.bottles[r.to] = r.toContent;
-    this.completed = r.completedBefore;
-    if (this.moveCount > 0) this.moveCount--;
+    if (r.type === 'shuffle') {
+      this.bottles = r.bottles;
+      this.completed = r.completed;
+    } else if (r.type === 'addBottle') {
+      // LIFO 保证此时新增瓶必为空（其后所有倒水已先被撤销）
+      this.bottles.splice(r.idx, 1);
+    } else {
+      this.bottles[r.from] = r.fromContent;
+      this.bottles[r.to] = r.toContent;
+      this.completed = r.completedBefore;
+      if (this.moveCount > 0) this.moveCount--;
+    }
     return true;
+  }
+
+  // ---------- 道具（方案 4） ----------
+
+  /**
+   * 道具·打乱：收拢场上全部液体重新随机分装（隐藏层全部揭示），保证有解。
+   * 重排后液体装满前 total/capacity 个瓶，其余为空瓶（空瓶只增不减，救死局用）。
+   * @returns {boolean} 是否成功（无可行重排时失败）
+   */
+  shuffle() {
+    const layers = [];
+    for (const b of this.bottles) {
+      for (const c of b) layers.push(c >= 0 ? c : -c - 1); // 隐藏层揭示
+    }
+    const total = layers.length;
+    if (total === 0 || total % this.capacity !== 0) return false;
+    const fullBottles = total / this.capacity;
+
+    const snapshot = {
+      type: 'shuffle',
+      bottles: this.bottles.map((b) => b.slice()),
+      completed: this.completed.slice(),
+    };
+
+    for (let attempt = 0; attempt < 60; attempt++) {
+      for (let i = layers.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [layers[i], layers[j]] = [layers[j], layers[i]];
+      }
+      const bottles = [];
+      for (let i = 0; i < this.bottles.length; i++) {
+        bottles.push(i < fullBottles ? layers.slice(i * this.capacity, (i + 1) * this.capacity) : []);
+      }
+      if (bottles.some((b) => this._isFullMono(b))) continue;
+      if (!this._solvable(bottles)) continue;
+      this.bottles = bottles;
+      this.undoStack.push(snapshot);
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * 道具·加瓶子：临时增加一个空瓶中转位（卡关救星）
+   * @returns {boolean} 是否成功（达到布局上限则失败）
+   */
+  addBottle() {
+    if (this.bottles.length >= 12) return false;
+    this.bottles.push([]);
+    this.undoStack.push({ type: 'addBottle', idx: this.bottles.length - 1 });
+    return true;
+  }
+
+  // ---------- 问号隐藏层（方案 3） ----------
+
+  /**
+   * 随机把 count 个非顶层液体层标记为隐藏（层值取负，真实色 = -(值+1)）。
+   * 隐藏层仅在成为顶层时揭示，倒水规则无需特判。
+   */
+  _markHidden(count, seed) {
+    const rng = new Rng(seed);
+    const candidates = [];
+    for (let bi = 0; bi < this.bottles.length; bi++) {
+      for (let li = 0; li < this.bottles[bi].length - 1; li++) {
+        candidates.push([bi, li]);
+      }
+    }
+    for (let i = 0; i < count && i < candidates.length; i++) {
+      const j = i + rng.int(candidates.length - i);
+      [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
+      const [bi, li] = candidates[i];
+      this.bottles[bi][li] = -(this.bottles[bi][li] + 1);
+    }
+  }
+
+  /** 揭示瓶顶的隐藏层（可能连续多层）。写法 -x-1 避免 -0 */
+  _revealTop(b) {
+    while (b.length && b[b.length - 1] < 0) {
+      b[b.length - 1] = -b[b.length - 1] - 1;
+    }
+  }
+
+  _revealTops() {
+    for (const b of this.bottles) this._revealTop(b);
   }
 
   // ---------- 判定 ----------

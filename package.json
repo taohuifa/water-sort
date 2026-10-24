@@ -5,6 +5,11 @@
   "type": "module",
   "description": "缤纷果汁铺 JuiceSort —— 微信小游戏倒水排序（该文件仅供 Node 跑单测，不参与小游戏打包）",
   "scripts": {
-    "test": "node tests/game.test.js"
+    "test": "node tests/game.test.js",
+    "smoke": "node tests/smoke.render.test.js",
+    "screenshot": "node tools/screenshot.mjs"
+  },
+  "devDependencies": {
+    "miniprogram-automator": "^0.13.0"
   }
 }

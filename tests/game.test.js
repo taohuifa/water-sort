@@ -3,8 +3,16 @@
  * 覆盖：关卡生成合法性、倒液规则、连续倒、完成清空、撤回、死局、可解性（DFS 求解器）
  */
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 import GameLogic from '../js/core/game.js';
-import { LEVELS, CAPACITY, COLORS } from '../js/core/levels.js';
+import { buildLevelsFromConfig, parseJsonc, CAPACITY, COLORS } from '../js/core/levels.js';
+
+// 从 assets/config/levels.json（.json 扩展名，内容为 JSONC 带注释）加载关卡配置，与游戏入口同源
+const DIFFICULTY_CURVE = parseJsonc(
+  readFileSync(new URL('../assets/config/levels.json', import.meta.url), 'utf8')
+);
+const LEVELS = buildLevelsFromConfig(DIFFICULTY_CURVE);
+const LEVEL_COUNT = LEVELS.length;
 
 let passed = 0;
 let failed = 0;
@@ -20,9 +28,75 @@ function test(name, fn) {
   }
 }
 
+console.log('== JSONC 解析 ==');
+
+test('stripJsonComments：行注释 / 块注释被剥离，字符串内的注释符号不误伤', () => {
+  const src = `{
+    // 行注释
+    "a": 1, /* 块注释 */
+    "url": "http://example.com//path", // 字符串内的 // 应保留
+    "s": "/* 不是注释 */",
+    "b": "转义\\"引号//仍保留"
+  }`;
+  const obj = parseJsonc(src);
+  assert.deepStrictEqual(obj, {
+    a: 1,
+    url: 'http://example.com//path',
+    s: '/* 不是注释 */',
+    b: '转义"引号//仍保留',
+  });
+});
+
+test('assets/config/levels.json 可解析且含全部难度曲线字段', () => {
+  const required = [
+    'levelCount',
+    'startColors',
+    'maxColors',
+    'baseEmpties',
+    'extraEmptyFromLevel',
+    'hiddenFromLevel',
+    'hiddenMax',
+    'seedBase',
+  ];
+  for (const key of required) {
+    assert.ok(key in DIFFICULTY_CURVE, `配置缺少字段 ${key}`);
+  }
+  assert.strictEqual(DIFFICULTY_CURVE.levelCount, LEVELS.length);
+  assert.ok(DIFFICULTY_CURVE.maxColors <= COLORS.length, '颜色数上限超出颜色表');
+});
+
+console.log('== 关卡配置生成 ==');
+
+test('关卡数量与字段由难度曲线配置决定', () => {
+  assert.strictEqual(LEVELS.length, LEVEL_COUNT);
+  for (let i = 0; i < LEVEL_COUNT; i++) {
+    const lv = LEVELS[i];
+    const level = i + 1;
+    assert.strictEqual(lv.level, level, 'level 字段应为关卡序号');
+    assert.strictEqual(
+      lv.colors,
+      Math.min(DIFFICULTY_CURVE.maxColors, DIFFICULTY_CURVE.startColors + Math.floor(level / 2)),
+      `第 ${level} 关颜色数不符合曲线`
+    );
+    assert.strictEqual(
+      lv.empties,
+      DIFFICULTY_CURVE.baseEmpties + (level >= DIFFICULTY_CURVE.extraEmptyFromLevel ? 1 : 0),
+      `第 ${level} 关空瓶数不符合曲线`
+    );
+    assert.strictEqual(lv.seed, DIFFICULTY_CURVE.seedBase + level, 'seed 应由基准 + 关卡号生成');
+  }
+});
+
+test('难度曲线单调不减，颜色数不超过颜色表', () => {
+  for (let i = 1; i < LEVELS.length; i++) {
+    assert.ok(LEVELS[i].colors >= LEVELS[i - 1].colors, '颜色数应单调不减');
+  }
+  assert.ok(Math.max(...LEVELS.map((l) => l.colors)) <= COLORS.length, '颜色数超出颜色表');
+});
+
 console.log('== 关卡生成 ==');
 
-test('每关：瓶数 = 颜色数 + 空瓶数，每色液体总量 = 容量，颜色 ID 合法', () => {
+test('每关：瓶数 = 颜色数 + 空瓶数，每色液体总量 = 容量（含隐藏层换算），颜色 ID 合法', () => {
   for (const cfg of LEVELS) {
     const logic = new GameLogic();
     logic.loadLevel(cfg);
@@ -31,8 +105,9 @@ test('每关：瓶数 = 颜色数 + 空瓶数，每色液体总量 = 容量，�
     const count = new Array(cfg.colors).fill(0);
     for (const b of logic.bottles) {
       assert.ok(b.length <= CAPACITY, '瓶内层数超容量');
-      for (const c of b) {
-        assert.ok(c >= 0 && c < cfg.colors, `非法颜色 ID ${c}`);
+      for (const raw of b) {
+        const c = raw >= 0 ? raw : -raw - 1; // 隐藏层换算回真实色
+        assert.ok(c >= 0 && c < cfg.colors, `非法颜色 ID ${raw}`);
         count[c]++;
       }
     }
@@ -195,6 +270,124 @@ test('hasAnyMove：无合法倒法时返回 false', () => {
   assert.ok(!logic.hasAnyMove());
   const logic2 = loadFixed([[0, 1], [1, 0], []]);
   assert.ok(logic2.hasAnyMove());
+});
+
+console.log('== 道具：打乱 ==');
+
+test('shuffle：每色总量保持、无开局完成瓶、局面必有解、可撤销', () => {
+  const logic = new GameLogic();
+  logic.loadLevel(LEVELS[7]); // 6 色 3 空
+  const before = logic.bottles.map((b) => b.slice());
+  assert.ok(logic.shuffle(), '打乱应成功');
+
+  // 每色总量不变
+  const count = {};
+  for (const b of logic.bottles) {
+    for (const c of b) count[c] = (count[c] || 0) + 1;
+  }
+  for (const [c, n] of Object.entries(count)) {
+    assert.strictEqual(n, CAPACITY, `颜色 ${c} 总量应保持 ${CAPACITY}`);
+  }
+  // 无开局完成瓶、必有解
+  assert.ok(!logic.bottles.some((b) => b.length === CAPACITY && b.every((c) => c === b[0])));
+  assert.ok(logic._solvable(logic.bottles), '打乱后局面应可解');
+  // 撤销恢复原局面
+  assert.ok(logic.undo());
+  assert.deepStrictEqual(logic.bottles, before);
+});
+
+test('shuffle 后无隐藏层（全部揭示）', () => {
+  const logic = new GameLogic();
+  logic.loadLevel(LEVELS[9]); // 含隐藏层关卡
+  assert.ok(logic.bottles.some((b) => b.some((c) => c < 0)), '第 10 关应有隐藏层');
+  assert.ok(logic.shuffle());
+  assert.ok(!logic.bottles.some((b) => b.some((c) => c < 0)), '打乱后不应有隐藏层');
+});
+
+console.log('== 道具：加瓶子 ==');
+
+test('addBottle：新增空瓶、死局复活、倒水后连续撤销可完整回退', () => {
+  const logic = loadFixed([[0, 1], [1, 0]], 2);
+  assert.ok(!logic.hasAnyMove(), '应为死局');
+  assert.ok(logic.addBottle());
+  assert.strictEqual(logic.bottles.length, 3);
+  assert.deepStrictEqual(logic.bottles[2], [], '新增瓶应为空');
+  assert.ok(logic.hasAnyMove(), '加瓶后应有可行走法');
+
+  // 倒水 → 连续撤销（LIFO：先撤倒水，再撤加瓶）
+  logic.pour(0, 2);
+  logic.undo();
+  logic.undo();
+  assert.strictEqual(logic.bottles.length, 2, '应移除新增瓶');
+  assert.deepStrictEqual(logic.bottles, [[0, 1], [1, 0]]);
+});
+
+test('addBottle：达到 12 瓶上限后失败', () => {
+  const bottles = [];
+  for (let i = 0; i < 12; i++) bottles.push([]);
+  const logic = loadFixed(bottles);
+  assert.ok(!logic.addBottle());
+});
+
+console.log('== 问号隐藏层 ==');
+
+test('关卡配置：第 4 关起隐藏层数量按曲线递增', () => {
+  assert.strictEqual(LEVELS[0].hiddenCount, 0);
+  assert.strictEqual(LEVELS[3].hiddenCount, 1); // 第 4 关
+  assert.strictEqual(LEVELS[5].hiddenCount, 2); // 第 6 关
+  assert.strictEqual(LEVELS[7].hiddenCount, 3); // 第 8 关
+  assert.strictEqual(LEVELS[9].hiddenCount, 3); // 第 10 关（封顶）
+});
+
+test('隐藏层标记：数量正确、全部位于非顶层、同 seed 可复现', () => {
+  const a = new GameLogic();
+  const b = new GameLogic();
+  const cfg = { colors: 5, empties: 2, seed: 506, hiddenCount: 3 };
+  a.loadLevel(cfg);
+  b.loadLevel(cfg);
+  assert.deepStrictEqual(a.bottles, b.bottles, '同 seed 局面应一致');
+  let hidden = 0;
+  for (const bottle of a.bottles) {
+    for (let li = 0; li < bottle.length; li++) {
+      if (bottle[li] < 0) {
+        hidden++;
+        assert.ok(li < bottle.length - 1, '隐藏层不得位于顶层');
+      }
+    }
+  }
+  assert.strictEqual(hidden, 3);
+});
+
+test('隐藏层揭示：倒出上层后顶层隐藏层转为真实颜色', () => {
+  const logic = new GameLogic();
+  logic.colorCount = 2;
+  // 瓶0 = [底层隐藏色0, 顶层 1]，瓶1 = [1,1,1]
+  logic.bottles = [[-1, 1], [1, 1, 1]];
+  const res = logic.pour(0, 1); // 顶层 1 倒入 → 瓶1 满纯色完成，瓶0 露出隐藏层
+  assert.strictEqual(res.completedColor, 1);
+  assert.deepStrictEqual(logic.bottles[0], [0], '隐藏层应揭示为真实色 0');
+});
+
+test('undo 撤销倒水后隐藏状态一并恢复', () => {
+  const logic = new GameLogic();
+  logic.colorCount = 2;
+  logic.bottles = [[-1, 1], [1, 1, 1]];
+  logic.pour(0, 1);
+  logic.undo();
+  assert.deepStrictEqual(logic.bottles[0], [-1, 1], '隐藏状态应随快照恢复');
+  assert.deepStrictEqual(logic.bottles[1], [1, 1, 1]);
+});
+
+test('隐藏层不影响倒水合法性判定（顶层始终已揭示）', () => {
+  const logic = new GameLogic();
+  logic.colorCount = 3;
+  // 瓶0 = [2, 隐藏1, 0]，顶层 0；瓶1 = [1, 0]，顶层 0
+  logic.bottles = [[2, -2, 0], [1, 0]];
+  assert.strictEqual(logic.canPour(0, 1), 1); // 顶层 0 == 顶层 0，可倒
+  const res = logic.pour(0, 1);
+  assert.strictEqual(res.amount, 1);
+  assert.deepStrictEqual(logic.bottles[0], [2, 1], '倒出 0 后露出隐藏 1，应立即揭示');
+  assert.deepStrictEqual(logic.bottles[1], [1, 0, 0]);
 });
 
 console.log('== 可解性（DFS 求解器端到端验证） ==');
