@@ -1,0 +1,13 @@
+# 其他
+.codebuddy
+**/raw/*
+__pycache__
+
+# docs 整体不上传，仅豁免通用规范 docs/specs/
+docs/*
+!docs/specs/
+
+# 系统文件
+Thumbs.db
+.DS_Store
+Desktop.ini

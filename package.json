@@ -1,0 +1,10 @@
+{
+  "name": "juice-sort",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "缤纷果汁铺 JuiceSort —— 微信小游戏倒水排序（该文件仅供 Node 跑单测，不参与小游戏打包）",
+  "scripts": {
+    "test": "node tests/game.test.js"
+  }
+}
