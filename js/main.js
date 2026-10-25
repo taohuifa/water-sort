@@ -49,6 +49,7 @@ export default class Main {
     this.pauseOverlay = false;
     this.props = { shuffle: 1, addBottle: 1 }; // 道具剩余次数（每关重置）
     this.adConfirm = null; // 广告补给确认浮层：null | 'shuffle' | 'addBottle'
+    this.shuffleSelecting = false; // 打乱选瓶模式：点瓶打乱其层序
 
     // ---------- 音效（WebAudio 合成，开关持久化） ----------
     this.soundOn = wx.getStorageSync(SOUND_KEY) !== false; // 默认开
@@ -94,6 +95,7 @@ export default class Main {
     this.winPanel = false;
     this.winDelay = 0;
     this.props = { shuffle: 1, addBottle: 1 }; // 道具每关重置
+    this.shuffleSelecting = false;
     this.logic.loadLevel(LEVELS[idx]);
     this.renderer.setupBoard(this.logic.bottles.length);
     this.renderer.displayedCompleted = 0;
@@ -208,6 +210,17 @@ export default class Main {
     // 倒水/飞行动画期间锁输入（抖动不影响）
     if (this.anims.blocking()) return;
 
+    // 打乱选瓶模式：点瓶执行打乱，再点「打乱」取消，其他区域忽略
+    if (this.shuffleSelecting) {
+      if (this.renderer.inCircle(x, y, this.renderer.shuffleBtn)) {
+        this.useShuffle();
+        return;
+      }
+      const sel = this.renderer.getBottleAt(x, y, this.logic);
+      if (sel >= 0) this.applyShuffleOne(sel);
+      return;
+    }
+
     // 底部按钮
     if (this.renderer.inCircle(x, y, this.renderer.undoBtn)) {
       this.audio.play('button');
@@ -229,7 +242,7 @@ export default class Main {
     }
 
     // 瓶子
-    const idx = this.renderer.getBottleAt(x, y);
+    const idx = this.renderer.getBottleAt(x, y, this.logic);
     if (idx >= 0) this.tapBottle(idx);
   }
 
@@ -324,20 +337,31 @@ export default class Main {
     }
   }
 
-  /** 道具·打乱（用尽后转为广告补给点位） */
+  /**
+   * 道具·打乱（选瓶模式）：点击后进入选择态，由玩家点选要打乱的单个瓶子。
+   * 次数在真正执行打乱时才扣减；用尽后转为广告补给点位。
+   */
   useShuffle() {
     if (this.anims.blocking()) return;
     if (this.props.shuffle <= 0) {
       this.adConfirm = 'shuffle';
       return;
     }
-    if (this.logic.shuffle()) {
+    this.shuffleSelecting = !this.shuffleSelecting;
+    this.selected = -1;
+    this.renderer.showToast(this.shuffleSelecting ? '点选一个瓶子，打乱它的层次' : '已取消打乱');
+  }
+
+  /** 执行选瓶打乱（失败则保持选择态，可换瓶重试） */
+  applyShuffleOne(idx) {
+    if (this.logic.shuffleOne(idx)) {
       this.audio.play('button');
       this.props.shuffle--;
-      this.selected = -1;
-      this.anims.list = []; // 局面突变，清掉进行中的动画
-      this.renderer.displayedCompleted = this.logic.completed.length;
-      this.renderer.showToast('已打乱场上液体');
+      this.shuffleSelecting = false;
+      this.renderer.showToast('已打乱该瓶');
+    } else {
+      this.audio.play('invalid');
+      this.renderer.showToast('空瓶或纯色瓶无法打乱');
     }
   }
 
@@ -400,6 +424,7 @@ export default class Main {
       anims: this.anims,
       winPanel: this.winPanel,
       levelIndex: this.levelIndex,
+      shuffleSelecting: this.shuffleSelecting,
       stuck: this.scene === 'game' && !this.logic.hasAnyMove(),
     });
 

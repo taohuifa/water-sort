@@ -8,6 +8,7 @@ import { CAPACITY } from './levels.js';
  * 数据结构：
  * - bottles: Array<Array<colorId>>，每个瓶子是一个颜色栈，index 0 为底层
  * - completed: 已上架的成品饮料颜色列表
+ * - removed: 已收走的瓶子下标集合（完成即连瓶收走，不再参与倒水/点击/重排）
  * - undoStack: 每次倒水的完整快照，支持无限步撤回
  */
 export default class GameLogic {
@@ -16,6 +17,7 @@ export default class GameLogic {
     this.colorCount = 0;
     this.bottles = [];
     this.completed = [];
+    this.removed = new Set();
     this.undoStack = [];
     this.moveCount = 0;
   }
@@ -27,6 +29,7 @@ export default class GameLogic {
     if (hiddenCount > 0) this._markHidden(hiddenCount, seed * 31 + 7);
     this._revealTops();
     this.completed = [];
+    this.removed = new Set();
     this.undoStack = [];
     this.moveCount = 0;
   }
@@ -73,10 +76,11 @@ export default class GameLogic {
    * 可解性验证：DFS 搜索（与游戏规则完全一致的模拟，含完成清空）。
    * 启发式：优先尝试倒向同色非空目标，空瓶目标靠后（空瓶是最稀缺的中转资源）。
    */
-  _solvable(bottles, nodeLimit = 60000) {
+  _solvable(bottles, nodeLimit = 60000, removedSet = null) {
     const cap = this.capacity;
     const bs = bottles.map((b) => b.slice());
     const n = bs.length;
+    const done = new Set(removedSet || []); // 已收走的瓶（含搜索中新完成的），不参与倒水
     const visited = new Set();
     let nodes = 0;
 
@@ -98,8 +102,9 @@ export default class GameLogic {
 
       const moves = [];
       for (let from = 0; from < n; from++) {
+        if (done.has(from)) continue;
         for (let to = 0; to < n; to++) {
-          if (from === to) continue;
+          if (from === to || done.has(to)) continue;
           const amount = amountOf(bs[from], bs[to]);
           if (!amount) continue;
           const t = bs[to];
@@ -119,9 +124,13 @@ export default class GameLogic {
         const f = bs[m.from];
         const t = bs[m.to];
         for (let i = 0; i < m.amount; i++) t.push(f.pop());
-        if (t.length === cap && t.every((c) => c === t[0])) t.length = 0; // 完成清空
+        if (t.length === cap && t.every((c) => c === t[0])) {
+          t.length = 0; // 完成清空 + 收走，不再参与后续搜索
+          done.add(m.to);
+        }
         if (dfs()) return true;
         for (let i = 0; i < n; i++) bs[i] = snap[i];
+        done.delete(m.to);
       }
       return false;
     };
@@ -153,12 +162,13 @@ export default class GameLogic {
 
   canPour(from, to) {
     if (from === to) return 0;
+    if (this.removed.has(from) || this.removed.has(to)) return 0; // 已收走的瓶不参与
     return this._amountOf(this.bottles[from], this.bottles[to]);
   }
 
   /**
    * 执行倒水：把源瓶顶层同色连续段整体倒入目标瓶。
-   * 目标瓶凑满纯色 → 判定完成：颜色记入货架，瓶子清空（腾出空瓶资源，方案 2.4）。
+   * 目标瓶凑满纯色 → 判定完成：颜色记入货架，瓶子一并收走（不留空瓶，方案 2.4 调整版）。
    * 源瓶露出隐藏层 → 立即揭示真实颜色（方案 3「?」层机制）。
    * @returns {null | {amount, color, completedColor}} completedColor >= 0 表示本次完成一瓶
    */
@@ -175,6 +185,7 @@ export default class GameLogic {
       fromContent: f.slice(),
       toContent: t.slice(),
       completedBefore: this.completed.slice(),
+      removedBefore: this.removed.has(to),
     };
     const color = f[f.length - 1];
     for (let i = 0; i < amount; i++) t.push(f.pop());
@@ -184,7 +195,8 @@ export default class GameLogic {
     if (this._isFullMono(t)) {
       completedColor = color;
       this.completed.push(color);
-      t.length = 0; // 完成即上架，玻璃瓶留在原地腾空
+      t.length = 0;
+      this.removed.add(to); // 完成即连瓶收走上架
     }
     this.undoStack.push(record);
     this.moveCount++;
@@ -198,13 +210,18 @@ export default class GameLogic {
     if (r.type === 'shuffle') {
       this.bottles = r.bottles;
       this.completed = r.completed;
+    } else if (r.type === 'shuffleOne') {
+      this.bottles[r.idx] = r.content;
     } else if (r.type === 'addBottle') {
       // LIFO 保证此时新增瓶必为空（其后所有倒水已先被撤销）
       this.bottles.splice(r.idx, 1);
+      this.removed.delete(r.idx);
     } else {
       this.bottles[r.from] = r.fromContent;
       this.bottles[r.to] = r.toContent;
       this.completed = r.completedBefore;
+      if (r.removedBefore) this.removed.add(r.to);
+      else this.removed.delete(r.to);
       if (this.moveCount > 0) this.moveCount--;
     }
     return true;
@@ -225,6 +242,12 @@ export default class GameLogic {
     const total = layers.length;
     if (total === 0 || total % this.capacity !== 0) return false;
     const fullBottles = total / this.capacity;
+    // 已收走的完成瓶不参与重排，保持空置
+    let activeCount = 0;
+    for (let i = 0; i < this.bottles.length; i++) {
+      if (!this.removed.has(i)) activeCount++;
+    }
+    if (fullBottles > activeCount) return false;
 
     const snapshot = {
       type: 'shuffle',
@@ -238,16 +261,45 @@ export default class GameLogic {
         [layers[i], layers[j]] = [layers[j], layers[i]];
       }
       const bottles = [];
+      let k = 0; // 已消耗的满瓶计数（跳过收走的瓶）
       for (let i = 0; i < this.bottles.length; i++) {
-        bottles.push(i < fullBottles ? layers.slice(i * this.capacity, (i + 1) * this.capacity) : []);
+        if (this.removed.has(i)) {
+          bottles.push([]);
+          continue;
+        }
+        bottles.push(k < fullBottles ? layers.slice(k * this.capacity, (k + 1) * this.capacity) : []);
+        k++;
       }
       if (bottles.some((b) => this._isFullMono(b))) continue;
-      if (!this._solvable(bottles)) continue;
+      if (!this._solvable(bottles, 60000, this.removed)) continue;
       this.bottles = bottles;
       this.undoStack.push(snapshot);
       return true;
     }
     return false;
+  }
+
+  /**
+   * 道具·打乱（选瓶模式）：只打乱指定瓶内的层序（隐藏层全部揭示）。
+   * 与全场打乱不同，不校验全局可解性（玩家可用撤回兜底）。
+   * @returns {boolean} 是否成功（空瓶 / 纯色瓶 / 已收走的瓶无法打乱）
+   */
+  shuffleOne(idx) {
+    const b = this.bottles[idx];
+    if (!b || !b.length || this.removed.has(idx)) return false;
+    const revealed = b.map((c) => (c >= 0 ? c : -c - 1)); // 隐藏层揭示
+    if (revealed.every((c) => c === revealed[0])) return false; // 纯色瓶无需打乱
+    const before = b.slice();
+    for (let attempt = 0; attempt < 24; attempt++) {
+      for (let i = revealed.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [revealed[i], revealed[j]] = [revealed[j], revealed[i]];
+      }
+      if (revealed.some((c, i) => c !== before[i])) break; // 保证与原排列不同
+    }
+    this.bottles[idx] = revealed;
+    this.undoStack.push({ type: 'shuffleOne', idx, content: before });
+    return true;
   }
 
   /**

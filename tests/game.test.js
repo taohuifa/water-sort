@@ -201,13 +201,23 @@ test('倒水后源瓶换色即停（只转移顶层同色段）', () => {
 
 console.log('== 完成判定与清空 ==');
 
-test('满瓶纯色 → 完成、记入货架、瓶子腾空（多一个空瓶资源）', () => {
-  const logic = loadFixed([[1, 2], [2, 2, 2]], 3);
+test('满瓶纯色 → 完成、记入货架、瓶子一并收走（不可再参与倒水）', () => {
+  const logic = loadFixed([[1, 2], [2, 2, 2], []], 3);
   const res = logic.pour(0, 1); // 顶层 2 一层倒入 → [2,2,2,2] 满纯色
   assert.strictEqual(res.amount, 1);
   assert.strictEqual(res.completedColor, 2);
   assert.deepStrictEqual(logic.bottles[1], []); // 完成即清空
   assert.deepStrictEqual(logic.completed, [2]);
+  assert.ok(logic.removed.has(1), '瓶 1 应被收走');
+  assert.strictEqual(logic.canPour(0, 1), 0, '收走的瓶不可再接收倒水');
+  assert.strictEqual(logic.canPour(1, 2), 0, '收走的瓶不可再作为源');
+});
+
+test('收走的瓶子不影响死局判定（不当作空瓶中转位）', () => {
+  const logic = loadFixed([[0, 1], [1, 0]], 2);
+  logic.bottles[1] = []; // 模拟完成后仅剩空瓶
+  logic.removed.add(1);
+  assert.ok(!logic.hasAnyMove(), '收走的空瓶不应算作可行目标');
 });
 
 test('满瓶但杂色 → 不完成', () => {
@@ -239,12 +249,14 @@ test('undo 恢复倒水前的瓶子内容', () => {
   assert.deepStrictEqual(logic.bottles, before);
 });
 
-test('undo 撤销完成效果（货架减少、瓶子恢复）', () => {
+test('undo 撤销完成效果（货架减少、瓶子放回、取消收走）', () => {
   const logic = loadFixed([[1, 2], [2, 2, 2]], 3);
   logic.pour(0, 1);
   assert.deepStrictEqual(logic.completed, [2]);
+  assert.ok(logic.removed.has(1));
   assert.ok(logic.undo());
   assert.deepStrictEqual(logic.completed, []);
+  assert.ok(!logic.removed.has(1), '撤回后瓶子应放回场上');
   assert.deepStrictEqual(logic.bottles[0], [1, 2]);
   assert.deepStrictEqual(logic.bottles[1], [2, 2, 2]);
 });
@@ -255,9 +267,9 @@ test('undo 空栈返回 false', () => {
 });
 
 test('moveCount 随倒水/撤回正确增减', () => {
-  const logic = loadFixed([[0, 2, 2], [2, 2]]);
+  const logic = loadFixed([[0, 2, 2], [2, 2], []], 3);
   logic.pour(0, 1); // 顶层 2 两层倒入 [2,2] → 满纯色完成
-  logic.pour(0, 1); // 剩 [0] 顶层 0 倒入空瓶
+  logic.pour(0, 2); // 剩 [0] 顶层 0 倒入空瓶
   assert.strictEqual(logic.moveCount, 2);
   logic.undo();
   assert.strictEqual(logic.moveCount, 1);
@@ -302,6 +314,46 @@ test('shuffle 后无隐藏层（全部揭示）', () => {
   assert.ok(logic.bottles.some((b) => b.some((c) => c < 0)), '第 10 关应有隐藏层');
   assert.ok(logic.shuffle());
   assert.ok(!logic.bottles.some((b) => b.some((c) => c < 0)), '打乱后不应有隐藏层');
+});
+
+test('shuffle：已收走的瓶子保持空置，不参与重排', () => {
+  const logic = loadFixed([[1, 1], [1, 1], [0, 0, 2, 2], [2, 2, 0, 0], [], [], []], 3);
+  logic.pour(0, 1); // [1,1] → [1,1,1,1] 完成收走
+  assert.ok(logic.removed.has(1));
+  assert.ok(logic.shuffle(), '打乱应成功');
+  assert.deepStrictEqual(logic.bottles[1], [], '收走的瓶应保持空置');
+  const flat = logic.bottles.flat().sort().join(',');
+  assert.strictEqual(flat, '0,0,0,0,2,2,2,2', '层集合不变');
+  assert.ok(logic.undo());
+  assert.ok(logic.removed.has(1), '撤销打乱不影响收走状态');
+});
+
+test('shuffleOne：单瓶层序重排、集合不变且揭示、可撤销', () => {
+  const logic = new GameLogic();
+  logic.colorCount = 2;
+  logic.bottles = [[0, -2, 1, 0], []]; // -2 为隐藏的真实色 1
+  assert.ok(logic.shuffleOne(0));
+  const b = logic.bottles[0];
+  assert.ok(b.every((c) => c >= 0), '隐藏层应全部揭示');
+  assert.strictEqual(
+    b.slice().sort((x, y) => x - y).join(','),
+    '0,0,1,1',
+    '层集合应保持不变'
+  );
+  assert.notDeepStrictEqual(b, [0, 1, 1, 0], '层序应与原排列不同');
+  assert.ok(logic.undo());
+  assert.deepStrictEqual(logic.bottles[0], [0, -2, 1, 0], '撤销应恢复含隐藏层的原状');
+});
+
+test('shuffleOne：空瓶 / 纯色瓶 / 已收走的瓶拒绝打乱', () => {
+  const logic = new GameLogic();
+  logic.colorCount = 2;
+  logic.bottles = [[], [1, 1, 1, 1], [0, 1], []];
+  logic.removed.add(3);
+  assert.ok(!logic.shuffleOne(0), '空瓶不可打乱');
+  assert.ok(!logic.shuffleOne(1), '纯色瓶不可打乱');
+  assert.ok(!logic.shuffleOne(3), '已收走的瓶不可打乱');
+  assert.ok(logic.shuffleOne(2), '多色瓶可打乱');
 });
 
 console.log('== 道具：加瓶子 ==');

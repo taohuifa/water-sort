@@ -70,7 +70,7 @@ export default class Renderer {
     this.shelf = {
       boardX: 24,
       boardW: W - 48,
-      rowY: [128, 204],
+      rowY: [150, 218], // 首层须低于顶栏文字行（topSafe+44），避免遮挡
       slotW: 56,
       perRow: 4,
     };
@@ -128,8 +128,9 @@ export default class Renderer {
     return { x, y };
   }
 
-  getBottleAt(px, py) {
+  getBottleAt(px, py, logic) {
     for (let i = 0; i < this.bottleRects.length; i++) {
+      if (logic && logic.removed && logic.removed.has(i)) continue; // 已收走的瓶不可点击
       const r = this.bottleRects[i];
       if (px >= r.x - 6 && px <= r.x + r.w + 6 && py >= r.y - 16 && py <= r.y + r.h + 8) {
         return i;
@@ -172,6 +173,7 @@ export default class Renderer {
     if (state.stuck && !state.winPanel && !state.anims.blocking()) {
       this.drawStuckTip();
     }
+    if (state.shuffleSelecting) this.drawShuffleHint();
     if (state.winPanel) this.drawWinPanel(state);
     else if (state.adConfirm) this.drawAdConfirm(state);
     else if (state.pauseOverlay) this.drawPauseOverlay();
@@ -495,13 +497,13 @@ export default class Renderer {
     ctx.textAlign = 'center';
     ctx.font = 'bold 19px sans-serif';
     ctx.fillText('缤纷果汁铺', this.W / 2, this.topSafe + 18);
-    // 关卡与步数行
+    // 关卡与步数行：与标题同行（左右两侧），彻底避开货架成品饮料区
     ctx.font = 'bold 14px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillStyle = '#9C7A52';
-    ctx.fillText(`第 ${state.levelIndex + 1} / ${this.levelCount} 关`, 16, this.topSafe + 44);
+    ctx.fillText(`第 ${state.levelIndex + 1} / ${this.levelCount} 关`, 16, this.topSafe + 18);
     ctx.textAlign = 'right';
-    ctx.fillText(`步数 ${state.logic.moveCount}`, this.W - 16, this.topSafe + 44);
+    ctx.fillText(`步数 ${state.logic.moveCount}`, this.W - 16, this.topSafe + 18);
     ctx.textBaseline = 'alphabetic';
   }
 
@@ -565,6 +567,9 @@ export default class Renderer {
     for (let i = 0; i < logic.bottles.length; i++) {
       const rect = this.bottleRects[i];
       const flying = anims.flyOf(i);
+
+      // 已收走的完成瓶不再绘制（正在倒入的完成瓶除外，保证倒水动画连贯）
+      if (logic.removed && logic.removed.has(i) && !(pour && pour.to === i)) continue;
 
       // 确定本帧显示的层数组（倒水动画期间的中间态）
       let layers;
@@ -738,6 +743,17 @@ export default class Renderer {
     ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('没有可行的倒法了，试试撤回或重开', this.W / 2, 236);
+    ctx.restore();
+  }
+
+  /** 打乱选瓶模式提示（顶栏下常驻，直到打乱执行或取消） */
+  drawShuffleHint() {
+    const { ctx } = this;
+    ctx.save();
+    ctx.fillStyle = '#E07B2A';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('点选要打乱的瓶子（再点「打乱」取消）', this.W / 2, this.topSafe + 44);
     ctx.restore();
   }
 

@@ -196,7 +196,7 @@ check('重开按钮：关卡重置', () => {
   assert.strictEqual(main.selected, -1);
 });
 
-check('道具：打乱 → 液体重排、层集合不变、次数用尽后无效', () => {
+check('道具：打乱 → 选瓶模式 → 点瓶打乱、层集合不变、次数用尽后无效', () => {
   const before = JSON.stringify(logic.bottles);
   const flat = (bs) =>
     bs
@@ -205,14 +205,25 @@ check('道具：打乱 → 液体重排、层集合不变、次数用尽后无�
       .sort()
       .join(',');
   tap(renderer.shuffleBtn.x, renderer.shuffleBtn.y);
+  assert.strictEqual(main.shuffleSelecting, true, '应进入选瓶模式');
+  main.tick(); // 绘制选瓶提示不抛错
+  // 选择一个多色瓶执行打乱
+  const idx = logic.bottles.findIndex(
+    (b) => new Set(b.map((c) => (c >= 0 ? c : -c - 1))).size > 1
+  );
+  assert.ok(idx >= 0, '应存在多色瓶');
+  const p = center(renderer.bottleRect(idx));
+  tap(p.x, p.y);
   assert.strictEqual(main.props.shuffle, 0, '打乱次数应扣减');
-  assert.notStrictEqual(JSON.stringify(logic.bottles), before, '局面应重排');
+  assert.strictEqual(main.shuffleSelecting, false, '打乱成功后应退出选瓶模式');
+  assert.notStrictEqual(JSON.stringify(logic.bottles), before, '该瓶层序应变化');
   assert.strictEqual(flat(logic.bottles), flat(JSON.parse(before)), '层集合应不变');
   main.tick(); // 绘制不抛错
   const after = JSON.stringify(logic.bottles);
-  tap(renderer.shuffleBtn.x, renderer.shuffleBtn.y);
-  assert.strictEqual(JSON.stringify(logic.bottles), after, '次数用尽应无效');
-  main.adConfirm = null; // 清理：用尽点击会弹广告确认浮层，后续测试单独覆盖
+  tap(renderer.shuffleBtn.x, renderer.shuffleBtn.y); // 次数用尽 → 广告确认浮层
+  assert.strictEqual(main.adConfirm, 'shuffle', '次数用尽应弹广告确认浮层');
+  main.adConfirm = null; // 清理：广告补给流程由后续测试单独覆盖
+  assert.strictEqual(JSON.stringify(logic.bottles), after, '未执行打乱，局面不变');
 });
 
 check('道具：加瓶 → 空瓶 +1、布局刷新、次数用尽后无效', () => {
