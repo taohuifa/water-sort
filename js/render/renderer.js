@@ -869,9 +869,10 @@ export default class Renderer {
     for (let i = 0; i < logic.bottles.length; i++) {
       const rect = this.bottleRects[i];
       const flying = anims.flyOf(i);
+      const badge = anims.badgeOf(i);
 
-      // 已收走的完成瓶不再绘制（正在倒入的完成瓶除外，保证倒水动画连贯）
-      if (logic.removed && logic.removed.has(i) && !(pour && pour.to === i)) continue;
+      // 已收走的完成瓶不再绘制（正在倒入/徽章展示中的完成瓶除外，保证动画连贯）
+      if (logic.removed && logic.removed.has(i) && !(pour && pour.to === i) && !badge) continue;
 
       // 确定本帧显示的层数组（倒水动画期间的中间态）
       let layers;
@@ -881,6 +882,8 @@ export default class Renderer {
       } else if (pour && pour.to === i) {
         const moved = anims.pourMoved(pour);
         layers = pour.toContentBefore.slice().concat(new Array(moved).fill(pour.color));
+      } else if (badge) {
+        layers = badge.layers; // 徽章阶段停留展示完成时的满色瓶
       } else {
         layers = logic.bottles[i];
       }
@@ -915,6 +918,8 @@ export default class Renderer {
       this.ctx.translate(0, -lift);
       this.drawBottle(rect, layers, selected === i, !!flying, keyIdx, this.bottleCap(i));
       this.ctx.restore();
+      // 满瓶完成标记：金色 ✓ 徽章叠加在瓶口（随后才起飞去货架）
+      if (badge) this.drawCompleteBadge(rect, badge.t);
       // 锁瓶角标（R4/R5）：未解锁的锁瓶在瓶口上方绘制锁形 + 进度/钥匙提示（矢量）
       if (logic.locks) {
         for (let k = 0; k < logic.locks.length; k++) {
@@ -1077,15 +1082,15 @@ export default class Renderer {
         ctx.fillStyle = grad;
         ctx.fillRect(liX, ly, liW, bh + 0.6); // 微重叠防缝隙
       }
-      if (band.hidden) { // 隐藏带的「?」标记（居中于可见灰紫区：上带圆底帽下凸会盖住本带顶部）
-        const coverTop = isBottom ? 0 : botH * CURVE_FRAC; // 上带圆底帽侵入本带顶部的高度
-        const vTop = ly + coverTop;
-        const vBot = yBot + (isTop ? 0 : botH * CURVE_FRAC); // 本带圆底帽下凸部分仍是本带颜色
+      if (band.hidden) { // 隐藏带的「?」标记：居中于本带未被上带圆底帽覆盖的可见区
+        // 圆底帽由「上面的带」下凸侵入本带顶部（顶带之上无带，不受侵入）——底/中带均会被侵入
+        const coverTop = isTop ? 0 : botH * CURVE_FRAC;
+        const midY = ly + (coverTop + bh) / 2; // 可见区 [ly+coverTop, yBot] 的中心
         ctx.fillStyle = 'rgba(255,255,255,0.92)';
         ctx.font = `bold ${Math.max(10, layerH * 0.7)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('?', x + w / 2, (vTop + vBot) / 2 + 0.5);
+        ctx.fillText('?', x + w / 2, midY + 0.5);
         ctx.textBaseline = 'alphabetic';
       }
     }
@@ -1096,10 +1101,27 @@ export default class Renderer {
       ctx.ellipse(x + w / 2, topY - 2, innerW / 2 - 2, 2.6, 0, 0, Math.PI * 2);
       ctx.fill();
     }
-    // 钥匙层角标（R5）：金色钥匙图形叠在该层中心，矢量绘制（无贴图依赖）
+    // 钥匙层角标（R5）：金色钥匙图形叠在该层可见区中心，矢量绘制（无贴图依赖）。
+    // 钥匙层若为本带顶层且本带之上还有带，层顶会被上带圆底帽侵入 coverK，
+    // 按层几何中心画会骑在分界弧上——改按可见区 [layerTop+coverK, layerBottom] 居中。
     if (keyLayerIdx >= 0 && keyLayerIdx < layers.length) {
-      const ky = bottomY - (keyLayerIdx + 0.5) * layerH;
-      this.drawKeyGlyph(x + w / 2, ky, Math.max(4, Math.min(layerH * 0.36, 9)));
+      let coverK = 0;
+      let acc = 0;
+      for (const bnd of bands) {
+        const bandTopLayer = acc + bnd.count - 1;
+        if (keyLayerIdx <= bandTopLayer) {
+          if (keyLayerIdx === bandTopLayer && bandTopLayer < layers.length - 1) {
+            coverK = botH * CURVE_FRAC;
+          }
+          break;
+        }
+        acc += bnd.count;
+      }
+      const layerTop = bottomY - (keyLayerIdx + 1) * layerH;
+      const ky = layerTop + coverK + (layerH - coverK) / 2;
+      const ks = Math.max(5, Math.min(layerH * 0.45, 12));
+      // 水平微调：钥匙图形（圆头在左、杆在右）视觉重心略偏左，右移 0.22s 使观感居中
+      this.drawKeyGlyph(x + w / 2 + ks * 0.22, ky, ks);
     }
     ctx.restore();
   }
@@ -1136,27 +1158,29 @@ export default class Renderer {
   drawCondLockBadge(rect, done, need) {
     const { ctx } = this;
     const cx = rect.x + rect.w / 2;
-    const cy = rect.y - 12;
+    const cy = rect.y - 4; // 底板下沿压住瓶口：贴合瓶口悬挂，不再悬浮脱节
+    const bw = Math.max(40, Math.min(52, rect.w + 14)); // 底板宽随瓶宽自适应，窄瓶不横向溢出
+    const bx = cx - bw / 2;
     ctx.save();
     // 底板
     ctx.fillStyle = 'rgba(62, 42, 24, 0.88)';
-    this.rr(cx - 26, cy - 10, 52, 20, 10);
+    this.rr(bx, cy - 10, bw, 20, 10);
     ctx.fill();
     // 锁体 + 锁梁（棕色）
     ctx.strokeStyle = '#E8C9A0';
     ctx.fillStyle = '#E8C9A0';
     ctx.lineWidth = 1.6;
-    this.rr(cx - 21, cy - 2, 10, 8, 2);
+    this.rr(bx + 4, cy - 2, 10, 8, 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.arc(cx - 16, cy - 2, 3.2, Math.PI, 0);
+    ctx.arc(bx + 9, cy - 2, 3.2, Math.PI, 0);
     ctx.stroke();
     // 进度文本
     ctx.fillStyle = '#FFF6E8';
     ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.fillText(`${Math.min(done, need)}/${need}`, cx - 7, cy + 0.5);
+    ctx.fillText(`${Math.min(done, need)}/${need}`, bx + 18, cy + 0.5);
     ctx.textBaseline = 'alphabetic';
     ctx.restore();
   }
@@ -1165,22 +1189,68 @@ export default class Renderer {
   drawKeyLockBadge(rect) {
     const { ctx } = this;
     const cx = rect.x + rect.w / 2;
-    const cy = rect.y - 12;
+    const cy = rect.y - 4; // 底板下沿压住瓶口：贴合瓶口悬挂，不再悬浮脱节
+    const bw = Math.max(40, Math.min(52, rect.w + 14)); // 底板宽随瓶宽自适应，窄瓶不横向溢出
+    const bx = cx - bw / 2;
     ctx.save();
     ctx.fillStyle = 'rgba(62, 42, 24, 0.88)';
-    this.rr(cx - 26, cy - 10, 52, 20, 10);
+    this.rr(bx, cy - 10, bw, 20, 10);
     ctx.fill();
     // 金色锁体 + 锁梁
     ctx.strokeStyle = '#FFD54F';
     ctx.fillStyle = '#FFD54F';
     ctx.lineWidth = 1.6;
-    this.rr(cx - 23, cy - 2, 10, 8, 2);
+    this.rr(bx + 5, cy - 2, 10, 8, 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.arc(cx - 18, cy - 2, 3.2, Math.PI, 0);
+    ctx.arc(bx + 10, cy - 2, 3.2, Math.PI, 0);
     ctx.stroke();
     // 钥匙提示
-    this.drawKeyGlyph(cx + 8, cy, 7);
+    this.drawKeyGlyph(bx + bw - 13, cy, 7);
+    ctx.restore();
+  }
+
+  /** 满瓶完成标记：瓶口金色 ✓ 圆徽 + 扩散光环（easeOutBack 弹出，停留展示后起飞） */
+  drawCompleteBadge(rect, t) {
+    const { ctx } = this;
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y + rect.h * 0.16; // 瓶口/瓶颈区域
+    // easeOutBack 弹出（轻微过冲回弹）
+    const c1 = 1.70158;
+    const c3 = c1 + 1;
+    const p = t - 1;
+    const s = Math.min(Math.max(1 + c3 * p * p * p + c1 * p * p, 0), 1.18);
+    const r = Math.max(10, rect.w * 0.36) * s;
+    if (r <= 0.5) return;
+    ctx.save();
+    // 扩散光环（前 70% 渐隐外扩）
+    if (t < 0.7) {
+      ctx.beginPath();
+      ctx.strokeStyle = `rgba(255, 214, 90, ${((0.55 * (0.7 - t)) / 0.7).toFixed(3)})`;
+      ctx.lineWidth = 2.5;
+      ctx.arc(cx, cy, r * (1 + t * 1.4), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    // 金色圆徽（径向渐变 + 白描边）
+    const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.2, cx, cy, r);
+    g.addColorStop(0, '#FFE082');
+    g.addColorStop(1, '#FFA000');
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.stroke();
+    // 白色对勾
+    ctx.beginPath();
+    ctx.lineWidth = Math.max(2.5, r * 0.26);
+    ctx.lineCap = 'round';
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.moveTo(cx - r * 0.42, cy + r * 0.02);
+    ctx.lineTo(cx - r * 0.08, cy + r * 0.38);
+    ctx.lineTo(cx + r * 0.46, cy - r * 0.32);
+    ctx.stroke();
     ctx.restore();
   }
 

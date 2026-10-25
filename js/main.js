@@ -396,7 +396,15 @@ export default class Main {
           fromContentBefore,
           toContentBefore,
           onDone: () => {
-            if (res.completedColor >= 0) this.startFly(to, res.completedColor);
+            if (res.completedColor >= 0) {
+              // 满瓶先打完成标记（满色瓶 + ✓ 徽章停留展示），标记结束后再起飞去货架
+              this.audio.play('complete');
+              this.anims.addBadge({
+                bottleIdx: to,
+                layers: toContentBefore.concat(new Array(res.amount).fill(res.color)),
+                onDone: () => this.startFly(to, res.completedColor),
+              });
+            }
           },
         });
       }
@@ -420,9 +428,8 @@ export default class Main {
     this.selected = logic.bottles[idx].length > 0 ? idx : -1;
   }
 
-  /** 成品饮料从瓶位飞向货架 */
+  /** 成品饮料从瓶位飞向货架（完成音效已前移至徽章弹出时机） */
   startFly(bottleIdx, color) {
-    this.audio.play('complete');
     const rect = this.renderer.bottleRect(bottleIdx);
     const slot = this.renderer.displayedCompleted;
     this.anims.addFly({

@@ -18,6 +18,11 @@ export default class Anims {
     this.list.push({ type: 'fly', t: 0, dur: 0.5, ...opts });
   }
 
+  /** 满瓶完成标记：满色瓶停留展示 ✓ 徽章，结束后再起飞去货架 */
+  addBadge(opts) {
+    this.list.push({ type: 'badge', t: 0, dur: 0.5, ...opts });
+  }
+
   addShake(bottleIdx) {
     // 同一瓶重复抖动直接跳过
     if (this.list.some((a) => a.type === 'shake' && a.bottleIdx === bottleIdx)) return;
@@ -46,6 +51,10 @@ export default class Anims {
 
   flyOf(bottleIdx) {
     return this.list.find((a) => a.type === 'fly' && a.bottleIdx === bottleIdx);
+  }
+
+  badgeOf(bottleIdx) {
+    return this.list.find((a) => a.type === 'badge' && a.bottleIdx === bottleIdx);
   }
 
   /** 抖动水平偏移 */

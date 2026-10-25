@@ -15,6 +15,7 @@ const ctxStub = new Proxy(
   {
     get(target, prop) {
       if (prop === 'createLinearGradient') return () => gradient;
+      if (prop === 'createRadialGradient') return () => gradient;
       if (prop === 'fillText') return (text) => globalThis.__fillTexts.push(String(text));
       if (typeof prop === 'symbol') return undefined;
       return target[prop] !== undefined ? target[prop] : noop;
@@ -719,6 +720,65 @@ check('设置页兑换码输入：unlock_all 解锁全部关卡、无效码提�
   tap(renderer.settingsResetBtn.x + 5, renderer.settingsResetBtn.y + 5);
   assert.strictEqual(main.cleared, 0, '重置后进度应归零');
   main.scene = 'menu';
+});
+
+check('满瓶完成徽章链：满色瓶停留 ✓ 徽章 → 徽章结束后才起飞货架', () => {
+  // 进入 L1，DFS 求解路径（与 AC-11 同源），逐步经 tap 驱动真实 UI 动画链
+  main.cleared = 1;
+  main.selectLevel(0);
+  main.tick();
+  assert.strictEqual(main.scene, 'game');
+
+  // 求解路径（纯逻辑层探索，undo 可完整回退）
+  const visited = new Set();
+  const path = [];
+  const dfs = () => {
+    if (logic.isWin()) return true;
+    const key = JSON.stringify(logic.bottles);
+    if (visited.has(key)) return false;
+    visited.add(key);
+    for (let from = 0; from < logic.bottles.length; from++) {
+      for (let to = 0; to < logic.bottles.length; to++) {
+        if (from === to || logic.canPour(from, to) === 0) continue;
+        logic.pour(from, to);
+        path.push([from, to]);
+        if (dfs()) return true;
+        path.pop();
+        logic.undo();
+      }
+    }
+    return false;
+  };
+  assert.ok(dfs(), 'L1 应可解');
+
+  // 重载干净局面，按路径经 tap 重放（走完整 UI 动画链）
+  main.loadLevel(0);
+  assert.strictEqual(logic.moveCount, 0);
+  let sawBadge = false;
+  for (const [from, to] of path) {
+    const doneBefore = logic.completed.length;
+    const p1 = center(renderer.bottleRect(from));
+    const p2 = center(renderer.bottleRect(to));
+    tap(p1.x, p1.y);
+    tap(p2.x, p2.y);
+    // 推进 0.5s：pour(0.38s) 完成 → 徽章已入场（t≈0.12）
+    for (let i = 0; i < 30 && !anims.allDone(); i++) anims.update(1 / 60);
+    if (logic.completed.length > doneBefore) {
+      const badge = anims.badgeOf(to);
+      assert.ok(badge, '完成瓶应处于徽章停留阶段');
+      assert.strictEqual(badge.layers.length, logic.capacity, '徽章阶段应展示满瓶');
+      assert.ok(badge.layers.every((c) => c === badge.layers[0]), '徽章阶段应展示纯色满瓶');
+      assert.ok(!anims.list.some((a) => a.type === 'fly'), '徽章结束前不应起飞去货架');
+      main.tick(); // 含徽章的绘制不抛错
+      sawBadge = true;
+      fastForward(); // 徽章 0.5s → 起飞 0.5s 落地
+      assert.strictEqual(renderer.displayedCompleted, logic.completed.length, '飞行落地后货架计数才 +1');
+    } else {
+      fastForward();
+    }
+  }
+  assert.ok(sawBadge, '应至少经过一次完成链路');
+  assert.ok(logic.isWin(), '按路径重放应通关');
 });
 
 console.log(`\n结果: ${failed === 0 ? '全部通过' : failed + ' 项失败'}`);
