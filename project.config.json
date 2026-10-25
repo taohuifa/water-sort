@@ -82,6 +82,22 @@
       {
         "value": "package-lock.json",
         "type": "file"
+      },
+      {
+        "value": ".codebuddy",
+        "type": "folder"
+      },
+      {
+        "value": ".git",
+        "type": "folder"
+      },
+      {
+        "value": ".eslintrc.js",
+        "type": "file"
+      },
+      {
+        "value": ".gitignore",
+        "type": "file"
       }
     ],
     "include": []

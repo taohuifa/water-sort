@@ -3,6 +3,7 @@
 **/raw/*
 __pycache__
 node_modules
+screenshots
 
 # docs 整体不上传，仅豁免通用规范 docs/specs/
 docs/*

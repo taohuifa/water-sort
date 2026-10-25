@@ -7,9 +7,10 @@
   "scripts": {
     "test": "node tests/game.test.js",
     "smoke": "node tests/smoke.render.test.js",
-    "screenshot": "node tools/screenshot.mjs"
+    "mcp-smoke": "node tests/mcp-smoke.mjs"
   },
   "devDependencies": {
-    "miniprogram-automator": "^0.13.0"
+    "miniprogram-automator": "^0.13.0",
+    "miniprogram-automator-next": "^0.1.1"
   }
 }
