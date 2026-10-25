@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="{{csp}}" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: #ccc;
+      background: #1e1e1e;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 32px 24px;
+      gap: 20px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: #1a3a1a;
+      border: 1px solid #2ea043;
+      border-radius: 20px;
+      padding: 4px 14px;
+      font-size: 12px;
+      color: #3fb950;
+      font-weight: 600;
+    }
+
+    h1 {
+      font-size: 20px;
+      color: #e8e8e8;
+      text-align: center;
+    }
+
+    .appid {
+      font-size: 12px;
+      color: #666;
+      font-family: 'Menlo', 'Consolas', monospace;
+    }
+
+    .qr-wrapper {
+      background: #fff;
+      border-radius: 12px;
+      padding: 16px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    }
+
+    .qr-wrapper img {
+      display: block;
+      width: 220px;
+      height: 220px;
+      image-rendering: pixelated;
+    }
+
+    .instructions {
+      text-align: center;
+      color: #888;
+      font-size: 13px;
+      line-height: 1.8;
+    }
+
+    .instructions strong {
+      color: #ccc;
+    }
+
+    .countdown {
+      font-size: 12px;
+      color: #666;
+      text-align: center;
+    }
+
+    .countdown span {
+      color: #e3a008;
+      font-weight: 600;
+    }
+
+    .steps-mini {
+      display: flex;
+      gap: 24px;
+      margin-top: 4px;
+    }
+
+    .step-mini {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      color: #777;
+      font-size: 11px;
+      text-align: center;
+      max-width: 80px;
+    }
+
+    .step-mini .icon { font-size: 22px; }
+
+    .arrow { color: #444; font-size: 18px; display: flex; align-items: center; }
+  </style>
+</head>
+<body>
+  <div class="badge">✓ 预览版本上传成功</div>
+  <h1>微信扫码进行真机预览</h1>
+  <div class="appid">AppID: {{appId}}</div>
+
+  <div class="qr-wrapper">
+    <img src="{{{qrcodeBase64}}}" alt="预览二维码" />
+  </div>
+
+  <div class="instructions">
+    打开 <strong>微信</strong>，使用「扫一扫」扫描上方二维码<br/>
+    即可在真实手机上预览小游戏
+  </div>
+
+  <div class="steps-mini">
+    <div class="step-mini">
+      <span class="icon">📱</span>
+      <span>打开微信</span>
+    </div>
+    <div class="arrow">›</div>
+    <div class="step-mini">
+      <span class="icon">📷</span>
+      <span>扫一扫</span>
+    </div>
+    <div class="arrow">›</div>
+    <div class="step-mini">
+      <span class="icon">🎮</span>
+      <span>真机预览</span>
+    </div>
+  </div>
+
+  <div class="countdown">
+    二维码有效期约 <span id="timer">{{expireMinutes}}:00</span>，过期后请重新生成
+  </div>
+
+  <script>
+    (function () {
+      var total = {{expireMinutes}} * 60;
+      var remaining = total;
+
+      function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+      var timerEl = document.getElementById('timer');
+      var interval = setInterval(function () {
+        remaining--;
+        if (remaining <= 0) {
+          clearInterval(interval);
+          timerEl.textContent = '已过期';
+          timerEl.style.color = '#f85149';
+          return;
+        }
+        var m = Math.floor(remaining / 60);
+        var s = remaining % 60;
+        timerEl.textContent = pad(m) + ':' + pad(s);
+        if (remaining <= 120) timerEl.style.color = '#f85149';
+      }, 1000);
+    })();
+  </script>
+</body>
+</html>

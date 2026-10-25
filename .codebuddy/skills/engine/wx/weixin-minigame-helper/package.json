@@ -1,0 +1,11 @@
+{
+  "name": "openclaw-cli",
+  "version": "1.0.0",
+  "private": true,
+  "description": "OpenClaw CLI runtime dependencies",
+  "dependencies": {
+    "miniprogram-ci": "^1.9.18",
+    "esbuild": "^0.21.5",
+    "express": "^4.18.2"
+  }
+}

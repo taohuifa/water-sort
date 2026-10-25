@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="{{{csp}}}" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      background: #1e1e1e;
+      color: #ccc;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 12px;
+      overflow: hidden;
+    }
+
+    /* ── Toolbar ── */
+    #toolbar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      background: linear-gradient(180deg, #2a2a2a 0%, #252525 100%);
+      border-bottom: 1px solid #1a1a1a;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+      flex-shrink: 0;
+      flex-wrap: nowrap;
+      overflow: hidden;
+    }
+
+    #toolbar select {
+      background: #333;
+      color: #ccc;
+      border: 1px solid #4a4a4a;
+      border-radius: 5px;
+      padding: 3px 6px;
+      font-size: 12px;
+      cursor: pointer;
+      flex-shrink: 1;
+      max-width: 140px;
+      min-width: 0;
+    }
+
+    #custom-size-inputs {
+      display: none;
+      align-items: center;
+      gap: 4px;
+    }
+    #custom-size-inputs.visible {
+      display: flex;
+    }
+    #custom-size-inputs input[type=number] {
+      width: 56px;
+      background: #3c3c3c;
+      color: #ccc;
+      border: 1px solid #555;
+      border-radius: 3px;
+      padding: 3px 5px;
+      font-size: 12px;
+      text-align: center;
+      -moz-appearance: textfield;
+    }
+    #custom-size-inputs input[type=number]::-webkit-inner-spin-button,
+    #custom-size-inputs input[type=number]::-webkit-outer-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    #custom-size-inputs input[type=number]:focus {
+      outline: none;
+      border-color: #4fc3f7;
+    }
+    #custom-size-inputs .size-sep {
+      color: #666;
+      font-size: 13px;
+    }
+    #btn-apply-custom {
+      padding: 3px 8px;
+      background: #4fc3f7;
+      color: #000;
+      border: none;
+      border-radius: 3px;
+      font-size: 11px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    #btn-apply-custom:hover { background: #81d4fa; }
+
+    #toolbar label {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+      user-select: none;
+      color: #bbb;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    #toolbar input[type=checkbox] {
+      cursor: pointer;
+      accent-color: #4fc3f7;
+    }
+
+    .sep {
+      width: 1px;
+      height: 14px;
+      background: #3a3a3a;
+      flex-shrink: 0;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 9px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
+      position: relative;
+    }
+    .btn:disabled { opacity: 0.35; cursor: default; }
+
+    /* Compact mode: hide text labels, show icon only */
+    .btn-label { transition: opacity 0.15s; }
+    #toolbar.compact .btn-label { display: none; }
+    #toolbar.compact .btn { padding: 3px 7px; }
+    #toolbar.compact #toolbar label span { display: none; }
+    #toolbar.compact .sep { display: none; }
+
+    /* Custom tooltip */
+    .x-tooltip {
+      position: fixed;
+      z-index: 9999;
+      background: #1a1a1a;
+      color: #ddd;
+      border: 1px solid #444;
+      border-radius: 4px;
+      padding: 4px 8px;
+      font-size: 11px;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.12s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    .x-tooltip.visible { opacity: 1; }
+    .btn-reload { background: #1a2e1a; color: #3fb950; border-color: #2ea043; }
+    .btn-reload:hover:not(:disabled) { background: #223322; border-color: #3fb950; }
+    .btn-stop   { background: #2e1a1a; color: #f85149; border-color: #da3633; }
+    .btn-stop:hover:not(:disabled)   { background: #331f1f; border-color: #f85149; }
+    .btn-real-device { background: #1e1530; color: #c084fc; border-color: #6f42c1; }
+    .btn-real-device:hover:not(:disabled) { background: #251840; border-color: #8250df; }
+    .btn-real-device-debug { background: #0d1f35; color: #79c0ff; border-color: #0969da; }
+    .btn-real-device-debug:hover:not(:disabled) { background: #102540; border-color: #1a7fe8; }
+    .btn-publish { background: #2e0d10; color: #ff7b72; border-color: #cf222e; }
+    .btn-publish:hover:not(:disabled) { background: #3a1015; border-color: #e5534b; }
+    .btn-config { background: transparent; color: #777; border: 1px solid #3a3a3a; font-size: 11px; padding: 2px 7px; }
+    .btn-config:hover { color: #bbb; border-color: #555; background: #2d2d2d; }
+    .btn-mcp { background: #0d2218; color: #56d364; border: 1px solid #1a7f37; font-size: 11px; }
+    .btn-mcp:hover:not(:disabled) { background: #112a1e; border-color: #2ea043; }
+
+    /* AppID display */
+    #appid-info {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: #666;
+      margin-left: auto;
+      flex-shrink: 1;
+      min-width: 0;
+      overflow: hidden;
+    }
+    #appid-label { color: #555; white-space: nowrap; flex-shrink: 0; }
+    #appid-value { color: #6ee7b7; font-family: 'Menlo', 'Consolas', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ── Game area ── */
+    #game-area {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      overflow: hidden;
+      background: #1a1a1a;
+      position: relative;
+      min-height: 0;
+    }
+
+    #game-frame {
+      border: none;
+      background: #000;
+      display: block;
+    }
+
+    /* ── Idle placeholder ── */
+    #idle-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+      color: #555;
+    }
+    #idle-placeholder .icon { font-size: 52px; }
+    #idle-placeholder h2 { font-size: 16px; color: #888; font-weight: 500; }
+    #idle-placeholder p  { font-size: 12px; color: #555; text-align: center; line-height: 1.7; }
+
+    /* ── Log panel ── */
+    #log-panel {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      background: #1a1a1a;
+      border-top: 1px solid #3a3a3a;
+      height: 160px;
+      min-height: 28px;
+      max-height: calc(100vh - 80px);
+    }
+
+    /* Drag handle at the top of the log panel */
+    #log-resize-handle {
+      height: 4px;
+      background: transparent;
+      cursor: ns-resize;
+      flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    #log-resize-handle:hover,
+    #log-resize-handle.dragging {
+      background: #4fc3f7;
+    }
+
+    #log-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      background: #252525;
+      border-bottom: 1px solid #333;
+      cursor: pointer;
+      user-select: none;
+      flex-shrink: 0;
+    }
+    #log-header:hover { background: #2a2a2a; }
+    #log-toggle-icon { font-size: 10px; transition: transform 0.15s; }
+    #log-header.collapsed #log-toggle-icon { transform: rotate(-90deg); }
+    #log-title { font-size: 11px; color: #888; font-weight: 600; letter-spacing: 0.5px; }
+    #log-count { font-size: 10px; color: #555; margin-left: auto; }
+    #btn-clear-log {
+      font-size: 10px;
+      padding: 1px 6px;
+      background: #333;
+      color: #888;
+      border: 1px solid #444;
+      border-radius: 2px;
+      cursor: pointer;
+    }
+    #btn-clear-log:hover { background: #3a3a3a; color: #aaa; }
+
+    #log-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+      font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+      font-size: 11px;
+      line-height: 1.5;
+      min-height: 0;
+    }
+    #log-body.hidden { display: none; }
+
+    .log-entry {
+      display: flex;
+      gap: 6px;
+      padding: 1px 10px;
+      border-bottom: 1px solid transparent;
+    }
+    .log-entry:hover { background: #222; }
+    .log-entry.log   { color: #ccc; }
+    .log-entry.warn  { color: #e3a008; background: rgba(227,160,8,0.05); }
+    .log-entry.error { color: #f85149; background: rgba(248,81,73,0.05); }
+    .log-time { color: #555; flex-shrink: 0; }
+    .log-msg  { word-break: break-all; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <!-- Device selector -->
+    <select id="device-select" title="模拟机型（改变游戏分辨率，会重新加载游戏）">
+      {{{deviceOptions}}}
+    </select>
+
+    <!-- Custom resolution inputs (shown when "Custom" is selected) -->
+    <div id="custom-size-inputs">
+      <input type="number" id="custom-width" min="100" max="2560" placeholder="宽" title="自定义宽度（px）" />
+      <span class="size-sep">×</span>
+      <input type="number" id="custom-height" min="100" max="2560" placeholder="高" title="自定义高度（px）" />
+      <button id="btn-apply-custom" title="应用自定义分辨率">应用</button>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- Mouse→Touch toggle -->
+    <label title="将鼠标事件转换为触摸事件，让游戏能响应鼠标操作">
+      <input type="checkbox" id="mouse-touch" checked />
+      鼠标模拟触屏
+    </label>
+
+    <div class="sep"></div>
+
+    <!-- Reload / Stop -->
+    <button class="btn btn-reload" id="btn-reload" {{{btnReloadAttr}}} title="重新加载游戏">↺ <span class="btn-label">重载</span></button>
+    <button class="btn btn-stop"   id="btn-stop"   {{{btnStopAttr}}} title="停止预览服务">■ <span class="btn-label">停止</span></button>
+
+    <div class="sep"></div>
+
+    <!-- Real device preview / debug / publish -->
+    <button class="btn btn-real-device" id="btn-real-device" title="编译并上传到微信平台，生成扫码预览链接">📱 <span class="btn-label">真机预览</span></button>
+    <button class="btn btn-real-device-debug" id="btn-real-device-debug" title="敬请期待" disabled style="opacity:0.4;cursor:not-allowed;">🔍 <span class="btn-label">真机调试</span></button>
+    <button class="btn btn-publish" id="btn-publish" title="使用 CI 发布小游戏">🚀 <span class="btn-label">发布</span></button>
+
+    <div class="sep"></div>
+
+    <!-- MCP config -->
+    <button class="btn btn-mcp" id="btn-mcp-config" title="配置 MCP 服务，接入 AI 编程工具">🔌 <span class="btn-label">MCP</span></button>
+
+    <!-- Config button + AppID display -->
+    <div id="appid-info">
+      {{#if hasAppId}}
+      <span id="appid-label">AppID:</span>
+      <span id="appid-value">{{{configuredAppId}}}</span>
+      {{/if}}
+      <button class="btn btn-config" id="btn-config" title="配置真机测试 AppID/密钥 及 WorkSpace 目录"><span class="btn-label">配置</span></button>
+    </div>
+  </div>
+
+  <!-- Publish dialog -->
+  <div id="publish-dialog-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.6);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:#2d2d2d;border:1px solid #444;border-radius:6px;padding:20px;width:360px;max-width:90%;">
+      <h3 style="margin:0 0 16px;font-size:14px;color:#e0e0e0;">🚀 发布小游戏</h3>
+      <div style="margin-bottom:12px;">
+        <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">版本号 <span style="color:#f85149;">*</span></label>
+        <input id="publish-version" type="text" placeholder="例如：1.0.0" style="width:100%;background:#3c3c3c;color:#e0e0e0;border:1px solid #555;border-radius:3px;padding:6px 8px;font-size:12px;outline:none;box-sizing:border-box;" />
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="display:block;font-size:12px;color:#aaa;margin-bottom:4px;">项目备注</label>
+        <textarea id="publish-desc" placeholder="本次发布的说明（可选）" rows="3" style="width:100%;background:#3c3c3c;color:#e0e0e0;border:1px solid #555;border-radius:3px;padding:6px 8px;font-size:12px;outline:none;resize:vertical;box-sizing:border-box;"></textarea>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end;">
+        <button id="publish-cancel" class="btn btn-config" style="padding:5px 14px;">取消</button>
+        <button id="publish-confirm" class="btn btn-publish" style="padding:5px 14px;">确认发布</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="game-area">
+    {{#if isRunning}}
+    <iframe id="game-frame"
+           src="{{{iframeSrc}}}"
+           allow="autoplay"
+           sandbox="allow-scripts allow-same-origin"></iframe>
+    {{/if}}
+    {{#unless isRunning}}
+    <div id="idle-placeholder">
+      <div class="icon">🎮</div>
+      <h2>小游戏预览</h2>
+      <p>正在启动预览服务…<br/>游戏画面将显示在此处</p>
+    </div>
+    {{/unless}}
+  </div>
+
+  <!-- Custom tooltip -->
+  <div class="x-tooltip" id="x-tooltip"></div>
+
+  <!-- Log panel -->
+  <div id="log-panel">
+    <div id="log-resize-handle"></div>
+    <div id="log-header">
+      <span id="log-toggle-icon">▼</span>
+      <span id="log-title">CONSOLE</span>
+      <span id="log-count">0 条</span>
+      <button id="btn-clear-log">清空</button>
+    </div>
+    <div id="log-body"></div>
+  </div>
+
+  <script>
+    (function () {
+      const vscode = acquireVsCodeApi();
+
+      // ── State ────────────────────────────────────────────────────────────
+      var baseUrl = {{{baseUrlJson}}};
+      var isPaused = false;
+      var logCount = 0;
+
+      // ── Device size & iframe reload ──────────────────────────────────────
+      var deviceSelect = document.getElementById('device-select');
+      var gameArea     = document.getElementById('game-area');
+
+      function buildFrameUrl(w, h, model) {
+        if (!baseUrl) return null;
+        return baseUrl + '?w=' + w + '&h=' + h + '&model=' + encodeURIComponent(model);
+      }
+
+      function applyDeviceSize() {
+        var frame = document.getElementById('game-frame');
+        if (!frame) return;
+        var parts = deviceSelect.value.split('x');
+        var w = parseInt(parts[0], 10);
+        var h = parseInt(parts[1], 10);
+        var areaW = gameArea.clientWidth;
+        var areaH = gameArea.clientHeight;
+        // Scale down only when the game is taller than the available height.
+        // When the panel is narrower than the game, keep scale = areaW/w so the
+        // black side-bars disappear and the game fills the full width (the top/
+        // bottom may be clipped instead of shrinking the whole picture).
+        var scaleByHeight = areaH / h;
+        var scaleByWidth  = areaW / w;
+        var scale;
+        if (scaleByHeight <= scaleByWidth) {
+          // Height is the limiting dimension — fit vertically (may have side bars)
+          scale = scaleByHeight;
+        } else {
+          // Width is the limiting dimension — fill horizontally, clip vertically
+          scale = scaleByWidth;
+        }
+        frame.style.width  = w + 'px';
+        frame.style.height = h + 'px';
+        frame.style.transform = 'scale(' + scale + ')';
+        frame.style.transformOrigin = 'center top';
+      }
+
+      function reloadFrameWithDevice() {
+        var frame = document.getElementById('game-frame');
+        if (!frame || !baseUrl) return;
+        var parts = deviceSelect.value.split('x');
+        var w = parseInt(parts[0], 10);
+        var h = parseInt(parts[1], 10);
+        var model = decodeURIComponent(parts[2] || '');
+        frame.src = buildFrameUrl(w, h, model);
+        // applyDeviceSize will be called on frame load
+      }
+
+      // ── Custom resolution inputs ────────────────────────────────────────
+      var customSizeInputs = document.getElementById('custom-size-inputs');
+      var customWidthInput  = document.getElementById('custom-width');
+      var customHeightInput = document.getElementById('custom-height');
+      var btnApplyCustom    = document.getElementById('btn-apply-custom');
+
+      function isCustomSelected() {
+        var parts = deviceSelect.value.split('x');
+        return decodeURIComponent(parts[2] || '') === 'Custom';
+      }
+
+      function syncCustomInputsVisibility() {
+        if (isCustomSelected()) {
+          customSizeInputs.classList.add('visible');
+          // Pre-fill with current custom value
+          var parts = deviceSelect.value.split('x');
+          if (!customWidthInput.value)  customWidthInput.value  = parts[0];
+          if (!customHeightInput.value) customHeightInput.value = parts[1];
+        } else {
+          customSizeInputs.classList.remove('visible');
+        }
+      }
+
+      function applyCustomResolution() {
+        var w = parseInt(customWidthInput.value, 10);
+        var h = parseInt(customHeightInput.value, 10);
+        if (!w || !h || w < 100 || h < 100) {
+          customWidthInput.style.borderColor  = (!w || w < 100) ? '#f85149' : '#555';
+          customHeightInput.style.borderColor = (!h || h < 100) ? '#f85149' : '#555';
+          return;
+        }
+        customWidthInput.style.borderColor  = '#555';
+        customHeightInput.style.borderColor = '#555';
+        // Update the custom option value so reloadFrameWithDevice picks it up
+        var opts = deviceSelect.options;
+        for (var i = 0; i < opts.length; i++) {
+          var parts = opts[i].value.split('x');
+          if (decodeURIComponent(parts[2] || '') === 'Custom') {
+            opts[i].value = w + 'x' + h + 'x' + encodeURIComponent('Custom');
+            opts[i].text  = '自定义 (' + w + '×' + h + ')';
+            break;
+          }
+        }
+        reloadFrameWithDevice();
+      }
+
+      deviceSelect.addEventListener('change', function () {
+        syncCustomInputsVisibility();
+        if (!isCustomSelected()) {
+          reloadFrameWithDevice();
+        }
+      });
+
+      btnApplyCustom.addEventListener('click', applyCustomResolution);
+
+      // Allow pressing Enter in either input to apply
+      [customWidthInput, customHeightInput].forEach(function (inp) {
+        inp.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') applyCustomResolution();
+        });
+        inp.addEventListener('input', function () {
+          inp.style.borderColor = '#555';
+        });
+      });
+
+      // Init visibility on page load
+      syncCustomInputsVisibility();
+
+      window.addEventListener('resize', applyDeviceSize);
+
+      var frame = document.getElementById('game-frame');
+      if (frame) {
+        frame.addEventListener('load', function () {
+          applyDeviceSize();
+          setTimeout(sendMouseTouchConfig, 150);
+        });
+        applyDeviceSize();
+      }
+
+      // ── Mouse → Touch emulation ──────────────────────────────────────────
+      var mouseTouchCheckbox = document.getElementById('mouse-touch');
+
+      function sendMouseTouchConfig() {
+        var f = document.getElementById('game-frame');
+        if (!f || !f.contentWindow) return;
+        f.contentWindow.postMessage(
+          { type: 'SET_MOUSE_TOUCH', enabled: mouseTouchCheckbox.checked },
+          '*'
+        );
+      }
+
+      mouseTouchCheckbox.addEventListener('change', sendMouseTouchConfig);
+
+      // ── Toolbar buttons ──────────────────────────────────────────────────
+      var btnReload = document.getElementById('btn-reload');
+      var btnStop   = document.getElementById('btn-stop');
+      var btnRealDevice = document.getElementById('btn-real-device');
+      var btnRealDeviceDebug = document.getElementById('btn-real-device-debug');
+      var btnPublish = document.getElementById('btn-publish');
+      var btnConfig = document.getElementById('btn-config');
+
+      btnReload.addEventListener('click', function () {
+        vscode.postMessage({ type: 'reload' });
+      });
+
+      btnStop.addEventListener('click', function () {
+        vscode.postMessage({ type: 'stop' });
+      });
+
+      btnRealDevice.addEventListener('click', function () {
+        vscode.postMessage({ type: 'realDevice' });
+      });
+
+      if (btnRealDeviceDebug) {
+        btnRealDeviceDebug.addEventListener('click', function () {
+          vscode.postMessage({ type: 'realDeviceDebug' });
+        });
+      }
+
+      if (btnPublish) {
+        btnPublish.addEventListener('click', function () {
+          showPublishDialog();
+        });
+      }
+
+      // ── Publish dialog ──────────────────────────────────────────────────
+      var publishOverlay = document.getElementById('publish-dialog-overlay');
+      var publishVersion = document.getElementById('publish-version');
+      var publishDesc    = document.getElementById('publish-desc');
+      var publishCancel  = document.getElementById('publish-cancel');
+      var publishConfirm = document.getElementById('publish-confirm');
+
+      function showPublishDialog() {
+        publishVersion.value = '';
+        publishDesc.value = '';
+        publishOverlay.style.display = 'flex';
+        setTimeout(function () { publishVersion.focus(); }, 50);
+      }
+
+      function hidePublishDialog() {
+        publishOverlay.style.display = 'none';
+      }
+
+      if (publishCancel) {
+        publishCancel.addEventListener('click', hidePublishDialog);
+      }
+
+      if (publishOverlay) {
+        publishOverlay.addEventListener('click', function (e) {
+          if (e.target === publishOverlay) hidePublishDialog();
+        });
+      }
+
+      if (publishConfirm) {
+        publishConfirm.addEventListener('click', function () {
+          var version = publishVersion.value.trim();
+          if (!version) {
+            publishVersion.style.borderColor = '#f85149';
+            publishVersion.focus();
+            return;
+          }
+          publishVersion.style.borderColor = '#555';
+          var desc = publishDesc.value.trim();
+          hidePublishDialog();
+          vscode.postMessage({ type: 'publish', version: version, desc: desc });
+        });
+      }
+
+      if (publishVersion) {
+        publishVersion.addEventListener('input', function () {
+          publishVersion.style.borderColor = '#555';
+        });
+        publishVersion.addEventListener('keydown', function (e) {
+          if (e.key === 'Enter') {
+            publishConfirm && publishConfirm.click();
+          } else if (e.key === 'Escape') {
+            hidePublishDialog();
+          }
+        });
+      }
+
+      if (btnConfig) {
+        btnConfig.addEventListener('click', function () {
+          // Open config panel directly
+          vscode.postMessage({ type: 'mcpConfig' });
+        });
+      }
+
+      var btnMcpConfig = document.getElementById('btn-mcp-config');
+      if (btnMcpConfig) {
+        btnMcpConfig.addEventListener('click', function () {
+          vscode.postMessage({ type: 'mcpConfig' });
+        });
+      }
+
+      // ── Messages from extension ──────────────────────────────────────────
+      window.addEventListener('message', function (e) {
+        var msg = e.data;
+        if (!msg || !msg.type) return;
+
+        // Log entries forwarded from the game iframe
+        if (msg.type === '__wx_log__') {
+          appendLog(msg.level, msg.ts, msg.msg);
+          return;
+        }
+
+        // Forward messages to the game iframe
+        var f = document.getElementById('game-frame');
+        if (f && f.contentWindow) {
+          if (msg.type === 'hotReload') {
+            // Hot reload: reload the iframe to pick up file changes
+            console.log('[Panel] Hot reload triggered for: ' + (msg.path || 'unknown'));
+            if (f.src) {
+              f.src = f.src;
+            }
+          }
+        }
+
+        // Update toolbar state from extension
+        if (msg.type === 'stateChange') {
+          updateToolbarState(msg.state);
+        }
+      });
+
+      function updateToolbarState(state) {
+        if (state === 'running') {
+          btnReload.disabled = false;
+          btnStop.disabled   = false;
+        } else if (state === 'stopped') {
+          btnReload.disabled = false;
+          btnStop.disabled   = true;
+        }
+      }
+
+      // ── Log panel drag-to-resize ─────────────────────────────────────────
+      var logPanel       = document.getElementById('log-panel');
+      var logResizeHandle = document.getElementById('log-resize-handle');
+      var logHeader      = document.getElementById('log-header');
+      var logBody        = document.getElementById('log-body');
+      var logCountEl     = document.getElementById('log-count');
+      var logCollapsed   = false;
+      var dragStartY     = 0;
+      var dragStartH     = 0;
+
+      logResizeHandle.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        dragStartY = e.clientY;
+        dragStartH = logPanel.offsetHeight;
+        logResizeHandle.classList.add('dragging');
+
+        function onMove(ev) {
+          var delta = dragStartY - ev.clientY; // drag up = positive = taller
+          var newH  = Math.max(28, Math.min(dragStartH + delta, window.innerHeight - 80));
+          logPanel.style.height = newH + 'px';
+          applyDeviceSize(); // re-scale game to fit remaining space
+        }
+
+        function onUp() {
+          logResizeHandle.classList.remove('dragging');
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup',   onUp);
+        }
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup',   onUp);
+      });
+
+      logHeader.addEventListener('click', function (e) {
+        if (e.target === document.getElementById('btn-clear-log')) return;
+        logCollapsed = !logCollapsed;
+        logBody.classList.toggle('hidden', logCollapsed);
+        logHeader.classList.toggle('collapsed', logCollapsed);
+      });
+
+      document.getElementById('btn-clear-log').addEventListener('click', function (e) {
+        e.stopPropagation();
+        logBody.innerHTML = '';
+        logCount = 0;
+        logCountEl.textContent = '0 条';
+      });
+
+      function appendLog(level, ts, msg) {
+        logCount++;
+        logCountEl.textContent = logCount + ' 条';
+
+        var entry = document.createElement('div');
+        entry.className = 'log-entry ' + (level || 'log');
+
+        var time = document.createElement('span');
+        time.className = 'log-time';
+        var d = new Date(ts);
+        time.textContent = pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+
+        var text = document.createElement('span');
+        text.className = 'log-msg';
+        text.textContent = msg;
+
+        entry.appendChild(time);
+        entry.appendChild(text);
+        logBody.appendChild(entry);
+
+        // Auto-scroll to bottom
+        logBody.scrollTop = logBody.scrollHeight;
+
+        // Cap at 500 entries in DOM
+        while (logBody.children.length > 500) {
+          logBody.removeChild(logBody.firstChild);
+        }
+      }
+
+      function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+
+      // ── Compact toolbar (hide labels when narrow) ────────────────────────
+      var toolbar = document.getElementById('toolbar');
+      var COMPACT_THRESHOLD = 560;
+
+      function updateCompact() {
+        if (toolbar.offsetWidth < COMPACT_THRESHOLD) {
+          toolbar.classList.add('compact');
+        } else {
+          toolbar.classList.remove('compact');
+        }
+      }
+
+      if (window.ResizeObserver) {
+        new ResizeObserver(updateCompact).observe(toolbar);
+      } else {
+        window.addEventListener('resize', updateCompact);
+      }
+      updateCompact();
+
+      // ── Custom tooltip ───────────────────────────────────────────────────
+      var xTooltip = document.getElementById('x-tooltip');
+      var tooltipTimer = null;
+
+      toolbar.addEventListener('mouseover', function (e) {
+        var target = e.target.closest('[title]');
+        if (!target || !toolbar.classList.contains('compact')) return;
+        var text = target.getAttribute('title');
+        if (!text) return;
+        clearTimeout(tooltipTimer);
+        tooltipTimer = setTimeout(function () {
+          var rect = target.getBoundingClientRect();
+          xTooltip.textContent = text;
+          xTooltip.classList.add('visible');
+          var left = rect.left + rect.width / 2;
+          var top = rect.bottom + 6;
+          xTooltip.style.left = left + 'px';
+          xTooltip.style.top = top + 'px';
+          xTooltip.style.transform = 'translateX(-50%)';
+        }, 300);
+      });
+
+      toolbar.addEventListener('mouseout', function (e) {
+        clearTimeout(tooltipTimer);
+        xTooltip.classList.remove('visible');
+      });
+
+    })();
+  </script>
+</body>
+</html>

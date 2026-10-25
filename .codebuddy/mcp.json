@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "wechat-devtools": {
+      "command": "C:\\Program Files (x86)\\Tencent\\微信web开发者工具\\微信开发者工具.exe",
+      "args": [
+        "-e",
+        "const e=process.argv[1],a=process.argv.slice(2).filter(function(x){return x!=='--electron'});if(!process.env.cwd)process.env.cwd=process.cwd();process.argv=[process.execPath,e,'--electron'].concat(a);require(e)",
+        "C:\\Program Files (x86)\\Tencent\\微信web开发者工具\\resources\\app.asar.unpacked\\js\\common\\cli\\skill-index.js",
+        "mcp",
+        "--token=knCzgTd043YspmDDoR90e0LryZqwsR3-"
+      ],
+      "env": {
+        "ELECTRON_RUN_AS_NODE": "1"
+      }
+    }
+  }
+}

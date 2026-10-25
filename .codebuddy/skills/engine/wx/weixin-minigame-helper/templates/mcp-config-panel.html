@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="{{csp}}" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: #ccc;
+      background: #1e1e1e;
+      padding: 24px;
+      line-height: 1.6;
+      max-width: 740px;
+    }
+
+    h1 { font-size: 20px; color: #e8e8e8; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+    .subtitle { color: #888; font-size: 12px; margin-bottom: 24px; }
+
+    /* ── Status badge ── */
+    .status-bar {
+      display: flex; align-items: center; gap: 10px;
+      background: #252525; border: 1px solid #3a3a3a; border-radius: 8px;
+      padding: 12px 16px; margin-bottom: 20px;
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%; background: #2ea043;
+      box-shadow: 0 0 6px rgba(46,160,67,0.5);
+      flex-shrink: 0;
+    }
+    .status-text { font-size: 12px; color: #9c9; font-weight: 500; }
+    .status-path {
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 11px;
+      color: #888; margin-left: auto; cursor: pointer;
+      padding: 2px 6px; border-radius: 3px;
+    }
+    .status-path:hover { background: #333; color: #ccc; }
+
+    /* ── Section ── */
+    .section { margin-bottom: 24px; }
+    .section-title {
+      font-size: 14px; font-weight: 600; color: #e8e8e8;
+      margin-bottom: 12px; display: flex; align-items: center; gap: 8px;
+    }
+    .section-title .badge {
+      font-size: 10px; padding: 1px 6px; border-radius: 3px;
+      font-weight: 600;
+    }
+    .badge-recommended { background: #0969da33; color: #58a6ff; border: 1px solid #0969da55; }
+    .badge-manual { background: #e3a00833; color: #e3c000; border: 1px solid #e3a00855; }
+
+    /* ── Quick config cards ── */
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .card {
+      background: #252525; border: 1px solid #3a3a3a; border-radius: 8px;
+      padding: 16px; cursor: default;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .card:hover { border-color: #555; }
+
+    .card-header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+    }
+    .card-icon {
+      font-size: 24px; width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      background: #2d2d2d; border-radius: 8px; flex-shrink: 0;
+    }
+    .card-name { font-size: 14px; font-weight: 600; color: #e8e8e8; }
+    .card-desc { font-size: 11px; color: #888; margin-bottom: 12px; line-height: 1.5; }
+
+    .card-status {
+      font-size: 10px; margin-bottom: 8px; display: flex; align-items: center; gap: 5px;
+    }
+    .card-status.configured { color: #2ea043; }
+    .card-status.not-configured { color: #666; }
+
+    .card .btn { width: 100%; justify-content: center; }
+
+    /* ── Config preview ── */
+    .config-block {
+      background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 6px;
+      padding: 12px 14px; position: relative;
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 11px;
+      color: #9cdcfe; line-height: 1.6; white-space: pre; overflow-x: auto;
+      margin-bottom: 8px;
+    }
+    .config-block .btn-copy-inline {
+      position: absolute; top: 8px; right: 8px;
+      font-size: 10px; padding: 2px 8px;
+      background: #333; color: #888; border: 1px solid #444;
+      border-radius: 3px; cursor: pointer;
+    }
+    .config-block .btn-copy-inline:hover { background: #3a3a3a; color: #ccc; }
+
+    /* ── Steps ── */
+    .steps { display: flex; flex-direction: column; gap: 10px; }
+    .step { display: flex; gap: 12px; align-items: flex-start; }
+    .step-num {
+      flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%;
+      background: #333; color: #888;
+      font-size: 10px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; margin-top: 2px;
+    }
+    .step-body { flex: 1; }
+    .step-title { font-weight: 500; color: #ccc; font-size: 12px; }
+    .step-desc { color: #777; font-size: 11px; margin-top: 2px; }
+
+    code {
+      background: #2d2d2d; border: 1px solid #3a3a3a; border-radius: 3px;
+      padding: 1px 5px;
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 11px; color: #ce9178;
+    }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 6px 14px; border: none; border-radius: 4px;
+      font-size: 12px; cursor: pointer; font-weight: 500;
+      transition: background 0.15s;
+    }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+    .btn-primary { background: #0969da; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #1a7fe8; }
+    .btn-secondary { background: #333; color: #ccc; border: 1px solid #444; }
+    .btn-secondary:hover:not(:disabled) { background: #3a3a3a; }
+
+    /* ── Callout ── */
+    .tip {
+      background: #1a2a3a; border-left: 3px solid #0969da;
+      border-radius: 0 4px 4px 0; padding: 8px 12px;
+      font-size: 12px; color: #9cdcfe; margin-top: 10px;
+    }
+
+    .divider { height: 1px; background: #2d2d2d; margin: 20px 0; }
+
+    /* ── Tool list ── */
+    .tool-list { margin-top: 10px; }
+    .tool-item {
+      display: flex; gap: 10px; padding: 8px 12px;
+      background: #252525; border: 1px solid #3a3a3a; border-radius: 6px;
+      margin-bottom: 6px;
+    }
+    .tool-item:hover { border-color: #444; }
+    .tool-name {
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 12px;
+      color: #dcdcaa; font-weight: 600; min-width: 100px;
+    }
+    .tool-desc { font-size: 11px; color: #888; }
+
+    /* ── Accordion ── */
+    details { margin-top: 12px; }
+    details summary {
+      cursor: pointer; color: #888; font-size: 12px; user-select: none;
+    }
+    details summary:hover { color: #aaa; }
+    details[open] summary { color: #ccc; }
+  </style>
+</head>
+<body>
+  <h1>⚙️ 配置</h1>
+  <p class="subtitle">管理小游戏预览插件的各项配置</p>
+
+  <!-- Workspace config section -->
+  <div class="section">
+    <div class="section-title">📁 Workspace 配置</div>
+    <p style="color: #999; font-size: 12px; margin-bottom: 12px;">
+      配置小游戏目录和真机测试所需的 AppID 及上传密钥。
+    </p>
+    <div class="cards">
+      <!-- Workspace dir card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">📂</div>
+          <span class="card-name">WorkSpace 目录</span>
+        </div>
+        <div class="card-desc">
+          指定小游戏所在的子目录（相对路径以项目根目录为基准，留空表示根目录）。
+        </div>
+        <div class="card-status configured" style="margin-bottom: 8px;">
+          当前：<code style="font-size: 10px;">{{workspaceDir}}</code>
+        </div>
+        <button class="btn btn-primary" id="btn-workspace-config">🖊 修改目录</button>
+      </div>
+
+      <!-- Real device config card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">📱</div>
+          <span class="card-name">真机测试配置</span>
+        </div>
+        <div class="card-desc">
+配置微信小游戏 AppID 和代码上传密钥，用于真机预览和上传开发版。
+        </div>
+        <button class="btn btn-primary" id="btn-edit-config" style="margin-top: 28px;">🔑 配置 AppID / 密钥</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- MCP config section -->
+  <h2 style="font-size: 16px; color: #e8e8e8; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">🔌 MCP 配置</h2>
+  <p class="subtitle" style="margin-bottom: 16px;">将 Mini Game Preview 的 MCP 服务接入 AI 编程工具，实现 AI 驱动的游戏预览与调试</p>
+
+  <!-- Status bar -->
+  <div class="status-bar">
+    <div class="status-dot"></div>
+    <span class="status-text">MCP Server 运行中</span>
+    <span class="status-path" id="btn-copy-path" title="点击复制路径">{{escapedPath}}</span>
+  </div>
+
+  <!-- Quick config section -->
+  <div class="section">
+    <div class="section-title">
+      ⚡ 一键配置
+      <span class="badge badge-recommended">推荐</span>
+    </div>
+
+    <div class="cards">
+      <!-- Cursor card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">🖱️</div>
+          <span class="card-name">Cursor</span>
+        </div>
+        <div class="card-desc">
+          自动写入 <code>.cursor/mcp.json</code>，重启 Cursor 即可在 Agent 模式中使用 MCP 工具。
+        </div>
+        <div class="card-status {{cursorStatusClass}}">
+          {{cursorStatusText}}
+        </div>
+        <button class="btn btn-primary" id="btn-config-cursor">
+          {{cursorBtnText}}
+        </button>
+      </div>
+
+      <!-- CodeBuddy card -->
+      <div class="card">
+        <div class="card-header">
+          <div class="card-icon">🤖</div>
+          <span class="card-name">CodeBuddy</span>
+        </div>
+        <div class="card-desc">
+          自动写入 <code>.codebuddy/mcp.json</code>，重启 CodeBuddy 即可使用 MCP 工具。
+        </div>
+        <div class="card-status {{codeBuddyStatusClass}}">
+          {{codeBuddyStatusText}}
+        </div>
+        <button class="btn btn-primary" id="btn-config-codebuddy">
+          {{codeBuddyBtnText}}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Manual config section -->
+  <div class="section">
+    <div class="section-title">
+      📋 手动配置
+      <span class="badge badge-manual">通用</span>
+    </div>
+
+    <p style="color: #999; font-size: 12px; margin-bottom: 12px;">
+      适用于 Claude Desktop、Cline、Windsurf 等支持 MCP 协议的 AI 工具。<br/>
+      将以下 JSON 配置复制到对应工具的 MCP 配置文件中即可。
+    </p>
+
+    <div class="config-block">
+      <button class="btn-copy-inline" id="btn-copy-config">📋 复制</button>{{escapedConfig}}</div>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-body">
+          <div class="step-title">复制上方 JSON 配置</div>
+          <div class="step-desc">点击「复制」按钮将 MCP 配置复制到剪贴板</div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-body">
+          <div class="step-title">打开 AI 工具的 MCP 配置文件</div>
+          <div class="step-desc">
+            <strong>Claude Desktop：</strong><code>claude_desktop_config.json</code><br/>
+            <strong>Cline：</strong>VSCode 设置 → Cline → MCP Servers<br/>
+            <strong>Windsurf：</strong><code>~/.windsurf/mcp.json</code>
+          </div>
+        </div>
+      </div>
+
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-body">
+          <div class="step-title">粘贴配置并重启工具</div>
+          <div class="step-desc">将 <code>mcpServers</code> 中的内容合并到已有配置中，保存后重启 AI 工具</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tip">
+      💡 MCP 服务使用 http 传输协议，无需手动启动。
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Available tools -->
+  <div class="section">
+    <div class="section-title">🛠 可用工具</div>
+    <p style="color: #999; font-size: 12px; margin-bottom: 10px;">
+      AI 连接 MCP 后可使用以下工具来控制小游戏预览：
+    </p>
+    <div class="tool-list">
+      <div class="tool-item">
+        <span class="tool-name">run_game</span>
+        <span class="tool-desc">启动小游戏预览，打开预览面板并加载游戏</span>
+      </div>
+      <div class="tool-item">
+        <span class="tool-name">reload_game</span>
+        <span class="tool-desc">重新加载当前运行的游戏（热重载，无需重启服务）</span>
+      </div>
+      <div class="tool-item">
+        <span class="tool-name">stop_game</span>
+        <span class="tool-desc">停止游戏，关闭预览面板和本地服务器</span>
+      </div>
+      <div class="tool-item">
+        <span class="tool-name">get_logs</span>
+        <span class="tool-desc">获取游戏控制台日志，支持正则过滤</span>
+      </div>
+      <div class="tool-item">
+        <span class="tool-name">real_device_preview</span>
+        <span class="tool-desc">编译并上传到微信平台，生成真机预览二维码（需提前配置 AppID 和上传密钥）</span>
+      </div>
+      <div class="tool-item">
+        <span class="tool-name">publish</span>
+<span class="tool-desc">通过 CI 将小游戏开发版上传到微信平台，需传入版本号和项目备注（需提前配置 AppID 和上传密钥）</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- FAQ -->
+  <details>
+    <summary>❓ 常见问题</summary>
+    <div style="padding: 12px 0; color: #999; font-size: 12px; line-height: 1.8;">
+      <p><strong style="color: #ccc;">Q: 配置后 AI 工具找不到 MCP 工具？</strong><br/>
+      A: 请确保 VSCode 已安装此插件并已启动。MCP Server 在插件激活时自动运行，AI 工具需要能找到 Node.js 并执行 server.js 文件。</p>
+      <br/>
+      <p><strong style="color: #ccc;">Q: 多个工作区可以共享同一个 MCP 配置吗？</strong><br/>
+      A: 是的，MCP Server 路径是插件安装路径下的固定位置，不同工作区可以使用相同的配置。</p>
+      <br/>
+      <p><strong style="color: #ccc;">Q: 更新插件后需要重新配置吗？</strong><br/>
+      A: 如果插件安装路径没变则无需重新配置。如果更新导致路径变化，可以点击「一键配置」重新生成。</p>
+    </div>
+  </details>
+
+  <script>
+    (function () {
+      var vscode = acquireVsCodeApi();
+
+      document.getElementById('btn-workspace-config').addEventListener('click', function () {
+        vscode.postMessage({ type: 'workspaceConfig' });
+      });
+
+      document.getElementById('btn-edit-config').addEventListener('click', function () {
+        vscode.postMessage({ type: 'editConfig' });
+      });
+
+      document.getElementById('btn-copy-path').addEventListener('click', function () {
+        vscode.postMessage({ type: 'copyServerPath' });
+      });
+
+      document.getElementById('btn-copy-config').addEventListener('click', function () {
+        vscode.postMessage({ type: 'copyConfig' });
+        var btn = this;
+        btn.textContent = '✅ 已复制';
+        setTimeout(function () { btn.textContent = '📋 复制'; }, 1500);
+      });
+
+      document.getElementById('btn-config-cursor').addEventListener('click', function () {
+        vscode.postMessage({ type: 'configCursor' });
+      });
+
+      document.getElementById('btn-config-codebuddy').addEventListener('click', function () {
+        vscode.postMessage({ type: 'configCodeBuddy' });
+      });
+    })();
+  </script>
+</body>
+</html>

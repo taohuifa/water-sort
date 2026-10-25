@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="{{csp}}" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: #ccc;
+      background: #1e1e1e;
+      padding: 24px;
+      line-height: 1.6;
+      max-width: 680px;
+    }
+
+    h1 { font-size: 18px; color: #e8e8e8; margin-bottom: 6px; }
+    .subtitle { color: #888; font-size: 12px; margin-bottom: 24px; }
+
+    /* ── Steps ── */
+    .steps { display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px; }
+
+    .step { display: flex; gap: 14px; align-items: flex-start; }
+
+    .step-num {
+      flex-shrink: 0;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: #0969da;
+      color: #fff;
+      font-size: 11px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      margin-top: 2px;
+    }
+
+    .step-body { flex: 1; }
+    .step-title { font-weight: 600; color: #e8e8e8; margin-bottom: 3px; }
+    .step-desc { color: #999; font-size: 12px; }
+
+    a { color: #4fc3f7; text-decoration: none; cursor: pointer; }
+    a:hover { text-decoration: underline; }
+
+    code {
+      background: #2d2d2d; border: 1px solid #3a3a3a; border-radius: 3px;
+      padding: 1px 5px;
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 11px; color: #ce9178;
+    }
+
+    /* ── Form ── */
+    .form-card {
+      background: #252525; border: 1px solid #3a3a3a; border-radius: 8px;
+      padding: 18px; margin-bottom: 14px;
+    }
+
+    .form-row { margin-bottom: 14px; }
+    .form-row:last-child { margin-bottom: 0; }
+
+    .form-label {
+      display: block; font-size: 12px; color: #aaa; margin-bottom: 5px; font-weight: 500;
+    }
+
+    .form-label .required { color: #f85149; margin-left: 2px; }
+    .form-label .hint { color: #666; font-weight: 400; margin-left: 6px; }
+
+    input[type=text] {
+      width: 100%;
+      background: #1a1a1a; border: 1px solid #444; border-radius: 4px;
+      color: #e8e8e8; font-size: 12px; padding: 7px 10px; outline: none;
+      font-family: 'Menlo', 'Consolas', monospace;
+    }
+    input[type=text]:focus { border-color: #0969da; }
+    input[type=text]::placeholder { color: #555; }
+    input[type=text].prefilled { color: #9cdcfe; }
+
+    .key-input-row { display: flex; gap: 6px; align-items: flex-start; }
+
+    textarea {
+      flex: 1;
+      height: 120px;
+      background: #1a1a1a; border: 1px solid #444; border-radius: 4px;
+      color: #9cdcfe;
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 11px;
+      padding: 8px; resize: vertical; outline: none;
+    }
+    textarea:focus { border-color: #0969da; }
+    textarea::placeholder { color: #555; }
+
+    .btn-pick-file {
+      flex-shrink: 0;
+      padding: 7px 12px;
+      background: #333; color: #ccc; border: 1px solid #444;
+      border-radius: 4px; font-size: 11px; cursor: pointer; white-space: nowrap;
+      align-self: flex-start;
+    }
+    .btn-pick-file:hover { background: #3a3a3a; color: #e8e8e8; }
+
+    /* ── Buttons ── */
+    .btn-row { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+    .btn {
+      padding: 7px 18px; border: none; border-radius: 4px;
+      font-size: 12px; cursor: pointer; font-weight: 500;
+    }
+    .btn:disabled { opacity: 0.4; cursor: default; }
+    .btn-primary { background: #0969da; color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #1a7fe8; }
+    .btn-secondary { background: #333; color: #ccc; border: 1px solid #444; }
+    .btn-secondary:hover { background: #3a3a3a; }
+
+    /* ── Callouts ── */
+    .tip {
+      background: #1a2a3a; border-left: 3px solid #0969da;
+      border-radius: 0 4px 4px 0; padding: 8px 12px;
+      font-size: 12px; color: #9cdcfe; margin-top: 8px;
+    }
+    .warning {
+      background: #2a1a00; border-left: 3px solid #e3a008;
+      border-radius: 0 4px 4px 0; padding: 8px 12px;
+      font-size: 12px; color: #e3c000; margin-top: 8px;
+    }
+
+    /* ── Env vars section ── */
+    .env-section { margin-top: 18px; }
+    .env-section summary {
+      cursor: pointer; color: #888; font-size: 12px; user-select: none;
+    }
+    .env-section summary:hover { color: #aaa; }
+    .env-block {
+      background: #252525; border: 1px solid #3a3a3a; border-radius: 6px;
+      padding: 9px 13px; margin-top: 7px;
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 11px; color: #9cdcfe;
+    }
+
+    .divider { height: 1px; background: #2d2d2d; margin: 20px 0; }
+  </style>
+</head>
+<body>
+  <h1>🔬 真机测试配置</h1>
+  <p class="subtitle">首次使用需要配置 AppID 和代码上传密钥，才能将游戏上传到微信平台进行真机扫码预览</p>
+
+  <!-- Steps -->
+  <div class="steps">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <div class="step-title">登录微信公众平台，获取 AppID 和代码上传密钥</div>
+        <div class="step-desc">
+          前往 <a id="link-admin" href="#">mp.weixin.qq.com</a>，路径：
+          <strong style="color:#ccc">管理 → 开发管理 → 开发设置 → 小程序代码上传</strong><br/>
+          复制 <code>AppID</code>，点击「生成最新的代码上传密钥」并下载 <code>.key</code> 文件
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <div class="step-title">配置 IP 白名单</div>
+        <div class="step-desc">
+          在同一页面将本机公网 IP 加入白名单，或临时关闭 IP 白名单验证
+        </div>
+        <div class="tip" id="ip-tip">
+          💡 本机公网 IP：<span id="my-ip" style="color:#4fc3f7;font-family:monospace;">获取中...</span>
+          <button id="btn-copy-ip" style="margin-left:8px;padding:2px 8px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;cursor:pointer;font-size:11px;">复制</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <div class="step-title">在下方填写 AppID 和密钥后保存</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Config form -->
+  <div class="form-card">
+    <!-- AppID -->
+    <div class="form-row">
+      <label class="form-label" for="appid-input">
+        AppID<span class="required">*</span>
+        {{#if hasAppId}}<span class="hint">（已从 project.config.json 读取，可修改）</span>{{/if}}
+      </label>
+      <input
+        type="text"
+        id="appid-input"
+        value="{{safeAppId}}"
+        placeholder="wx1234567890abcdef"
+        class="{{appIdClass}}"
+        autocomplete="off"
+        spellcheck="false"
+      />
+    </div>
+
+    <!-- Private Key -->
+    <div class="form-row">
+      <label class="form-label" for="key-input">
+        代码上传密钥<span class="required">*</span>
+        <span class="hint">（.key 文件内容）</span>
+      </label>
+      <div class="key-input-row">
+        <textarea
+          id="key-input"
+          placeholder="-----BEGIN PRIVATE KEY-----&#10;MIIEvgIBADANBgkqhkiG9w0BAQEFAAS...&#10;-----END PRIVATE KEY-----&#10;&#10;也可以点击右侧「选择文件」按钮直接读取 .key 文件"
+        ></textarea>
+        <button class="btn-pick-file" id="btn-pick-file">📂 选择文件</button>
+      </div>
+      <div class="warning">⚠️ AppID 和密钥将加密存储在 VSCode 密钥库中，不会明文写入磁盘或设置文件</div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-primary" id="btn-save">保存并开始预览</button>
+      <button class="btn btn-secondary" id="btn-cancel">取消</button>
+    </div>
+  </div>
+
+  <!-- Env var alternative -->
+  <details class="env-section">
+    <summary> 通过环境变量配置（CI/CD 场景）</summary>
+    <div class="env-block">WECHAT_APPID=wx1234567890abcdef</div>
+    <div class="env-block" style="margin-top:5px">WECHAT_PRIVATE_KEY_PATH=/path/to/private.key</div>
+    <div class="env-block" style="margin-top:5px">WECHAT_PRIVATE_KEY=&lt;base64 编码的密钥内容&gt;</div>
+    <div class="tip" style="margin-top:8px">设置环境变量后重启 VSCode，再次点击「真机测试」即可自动识别，无需手动填写</div>
+  </details>
+
+  <script>
+    (function () {
+      const vscode = acquireVsCodeApi();
+
+      // ── Button handlers ──────────────────────────────────────────────────────
+
+      document.getElementById('btn-pick-file').addEventListener('click', function () {
+        vscode.postMessage({ type: 'pickKeyFile' });
+      });
+
+      document.getElementById('btn-save').addEventListener('click', function () {
+        const appId = document.getElementById('appid-input').value.trim();
+        const key   = document.getElementById('key-input').value.trim();
+
+        if (!appId) {
+          alert('请填写 AppID');
+          document.getElementById('appid-input').focus();
+          return;
+        }
+        if (!/^wx[0-9a-fA-F]{16}$/.test(appId) && !/^wx/.test(appId)) {
+          const ok = confirm('AppID 格式看起来不对（通常以 wx 开头），确认继续？');
+          if (!ok) return;
+        }
+        if (!key) {
+          alert('请填写或选择代码上传密钥');
+          document.getElementById('key-input').focus();
+          return;
+        }
+        if (!key.includes('PRIVATE KEY')) {
+          const ok = confirm('密钥内容格式看起来不像 PEM 格式（通常以 -----BEGIN 开头），确认继续？');
+          if (!ok) return;
+        }
+        vscode.postMessage({ type: 'save', appId, privateKey: key });
+      });
+
+      document.getElementById('btn-cancel').addEventListener('click', function () {
+        vscode.postMessage({ type: 'cancel' });
+      });
+
+      document.getElementById('link-admin').addEventListener('click', function (e) {
+        e.preventDefault();
+        vscode.postMessage({ type: 'openAdmin' });
+      });
+
+      // ── Receive injected key file content from extension ─────────────────────
+      window.addEventListener('message', function (e) {
+        const msg = e.data;
+        if (msg && msg.type === 'injectKey') {
+          document.getElementById('key-input').value = msg.content;
+          document.getElementById('key-input').focus();
+        }
+      });
+
+      // ── Auto-fetch public IP (via server API to avoid CORS) ────────────────
+      var myIp = '';
+      function fetchPublicIP() {
+        console.log('[IP Fetch] 开始获取公网 IP...');
+        fetch('/api/public-ip')
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            console.log('[IP Fetch] 响应:', data);
+            if (data.success && data.ip) {
+              console.log('[IP Fetch] 获取成功:', data.ip, '来源:', data.source);
+              myIp = data.ip;
+              document.getElementById('my-ip').textContent = myIp;
+            } else {
+              throw new Error(data.error || 'Unknown error');
+            }
+          })
+          .catch(function (err) {
+            console.error('[IP Fetch] 获取失败:', err);
+            document.getElementById('my-ip').innerHTML = '获取失败 <span style="font-size:12px;color:#888">(可手动查询)</span>';
+            document.getElementById('my-ip').title = '自动获取失败，请在终端执行 curl ifconfig.me 查询';
+          });
+      }
+      fetchPublicIP();
+
+      document.getElementById('btn-copy-ip').addEventListener('click', function () {
+        if (!myIp) return;
+        navigator.clipboard.writeText(myIp).then(function () {
+          var btn = document.getElementById('btn-copy-ip');
+          var orig = btn.textContent;
+          btn.textContent = '已复制';
+          btn.style.color = '#3fb950';
+          setTimeout(function () {
+            btn.textContent = orig;
+            btn.style.color = '#ccc';
+          }, 1500);
+        });
+      });
+    })();
+  </script>
+</body>
+</html>

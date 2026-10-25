@@ -1,0 +1,16 @@
+{
+  "name": "weixin-minigame-helper",
+  "description": "微信小游戏预览、调试、真机测试和发布插件",
+  "version": "0.1.0",
+  "category": "development",
+  "author": {
+    "name": "weixin-minigame-helper",
+    "url": "https://git.woa.com/weadmin/ai-minigame-engine"
+  },
+  "homepage": "https://git.woa.com/weadmin/ai-minigame-engine",
+  "repository": "https://git.woa.com/weadmin/ai-minigame-engine.git",
+  "license": "MIT",
+  "skills": [
+    "./SKILL.md"
+  ]
+}

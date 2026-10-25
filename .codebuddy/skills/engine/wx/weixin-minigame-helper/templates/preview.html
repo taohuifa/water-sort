@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>微信小游戏预览</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%; height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 12px;
+      color: #ccc;
+      background: #1e1e1e;
+      overflow: hidden;
+    }
+
+    body { display: flex; flex-direction: column; }
+
+    /* ── Toolbar ── */
+    #toolbar {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 8px;
+      background: linear-gradient(180deg, #2a2a2a 0%, #252525 100%);
+      border-bottom: 1px solid #1a1a1a;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+      flex-shrink: 0; flex-wrap: nowrap; overflow: hidden;
+    }
+
+    #toolbar select {
+      background: #333; color: #ccc; border: 1px solid #4a4a4a;
+      border-radius: 5px; padding: 3px 6px; font-size: 12px; cursor: pointer;
+      flex-shrink: 1; max-width: 140px; min-width: 0;
+    }
+
+    .sep { width: 1px; height: 14px; background: #3a3a3a; flex-shrink: 0; }
+
+    #toolbar label {
+      display: flex; align-items: center; gap: 4px;
+      cursor: pointer; user-select: none; color: #bbb;
+      white-space: nowrap; flex-shrink: 0;
+    }
+
+    #toolbar input[type=checkbox] { cursor: pointer; accent-color: #4fc3f7; }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 9px; border: 1px solid transparent; border-radius: 5px;
+      font-size: 12px; cursor: pointer; transition: all 0.15s;
+      white-space: nowrap; flex-shrink: 0; position: relative;
+    }
+    .btn:disabled { opacity: 0.35; cursor: default; }
+
+    /* Compact mode: hide text labels, show icon only */
+    .btn-label { transition: opacity 0.15s; }
+    #toolbar.compact .btn-label { display: none; }
+    #toolbar.compact .btn { padding: 3px 7px; }
+    #toolbar.compact #toolbar label span { display: none; }
+    #toolbar.compact .sep { display: none; }
+
+    /* Custom tooltip */
+    .x-tooltip {
+      position: fixed; z-index: 9999;
+      background: #1a1a1a; color: #ddd;
+      border: 1px solid #444; border-radius: 4px;
+      padding: 4px 8px; font-size: 11px;
+      white-space: nowrap; pointer-events: none;
+      opacity: 0; transition: opacity 0.12s;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+    }
+    .x-tooltip.visible { opacity: 1; }
+    .btn-reload { background: #1a2e1a; color: #3fb950; border-color: #2ea043; }
+    .btn-reload:hover:not(:disabled) { background: #223322; border-color: #3fb950; }
+    .btn-stop { background: #2e1a1a; color: #f85149; border-color: #da3633; }
+    .btn-stop:hover:not(:disabled) { background: #331f1f; border-color: #f85149; }
+    .btn-real-device { background: #1e1530; color: #c084fc; border-color: #6f42c1; }
+    .btn-real-device:hover:not(:disabled) { background: #251840; border-color: #8250df; }
+    .btn-publish { background: #2e0d10; color: #ff7b72; border-color: #cf222e; }
+    .btn-publish:hover:not(:disabled) { background: #3a1015; border-color: #e5534b; }
+    .btn-config { background: transparent; color: #777; border: 1px solid #3a3a3a; font-size: 11px; padding: 3px 8px; }
+    .btn-config:hover { color: #bbb; border-color: #555; background: #2d2d2d; }
+
+    .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+    /* ── Game area ── */
+    #game-area {
+      flex: 1; display: flex; justify-content: center; align-items: flex-start;
+      overflow: hidden; background: #1a1a1a; position: relative; min-height: 0;
+    }
+
+    #game-frame { border: none; background: #000; display: block; }
+
+    /* ── Log panel ── */
+    #log-panel {
+      flex-shrink: 0; display: flex; flex-direction: column;
+      background: #1a1a1a; border-top: 1px solid #3a3a3a;
+      height: 140px; min-height: 28px; max-height: calc(100vh - 80px);
+    }
+
+    #log-resize-handle {
+      height: 4px; background: transparent; cursor: ns-resize;
+      flex-shrink: 0; transition: background 0.15s;
+    }
+    #log-resize-handle:hover, #log-resize-handle.dragging { background: #4fc3f7; }
+
+    #log-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 4px 10px; background: #252525; border-bottom: 1px solid #333;
+      cursor: pointer; user-select: none; flex-shrink: 0;
+    }
+    #log-header:hover { background: #2a2a2a; }
+    #log-toggle-icon { font-size: 10px; transition: transform 0.15s; }
+    #log-header.collapsed #log-toggle-icon { transform: rotate(-90deg); }
+    #log-title { font-size: 11px; color: #888; font-weight: 600; letter-spacing: 0.5px; }
+    #log-count { font-size: 10px; color: #555; margin-left: auto; }
+    #btn-clear-log {
+      font-size: 10px; padding: 1px 6px; background: #333; color: #888;
+      border: 1px solid #444; border-radius: 2px; cursor: pointer;
+    }
+    #btn-clear-log:hover { background: #3a3a3a; color: #aaa; }
+
+    #log-body {
+      flex: 1; overflow-y: auto; padding: 4px 0;
+      font-family: 'Menlo', 'Consolas', 'Courier New', monospace;
+      font-size: 11px; line-height: 1.5; min-height: 0;
+    }
+    #log-body.hidden { display: none; }
+
+    .log-entry { display: flex; gap: 6px; padding: 1px 10px; border-bottom: 1px solid transparent; }
+    .log-entry:hover { background: #222; }
+    .log-entry.log { color: #ccc; }
+    .log-entry.warn { color: #e3a008; background: rgba(227,160,8,0.05); }
+    .log-entry.error { color: #f85149; background: rgba(248,81,73,0.05); }
+    .log-time { color: #555; flex-shrink: 0; }
+    .log-msg { word-break: break-all; white-space: pre-wrap; }
+
+    /* ── Modal overlay ── */
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.6); z-index: 1000;
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.visible { display: flex; }
+
+    .modal {
+      background: #2d2d2d; border: 1px solid #444; border-radius: 8px;
+      padding: 24px; width: 460px; max-width: 92vw; max-height: 90vh;
+      overflow-y: auto; position: relative;
+    }
+
+    .modal h2 { font-size: 16px; color: #e8e8e8; margin-bottom: 6px; }
+    .modal .subtitle { color: #888; font-size: 12px; margin-bottom: 18px; }
+
+    .modal-close {
+      position: absolute; top: 12px; right: 16px; background: none; border: none;
+      color: #666; font-size: 18px; cursor: pointer; padding: 4px;
+    }
+    .modal-close:hover { color: #ccc; }
+
+    /* ── Form elements in modals ── */
+    .form-row { margin-bottom: 14px; }
+    .form-row:last-child { margin-bottom: 0; }
+
+    .form-label { display: block; font-size: 12px; color: #aaa; margin-bottom: 5px; font-weight: 500; }
+    .form-label .required { color: #f85149; margin-left: 2px; }
+    .form-label .hint { color: #666; font-weight: 400; margin-left: 6px; }
+
+    .form-input {
+      width: 100%; background: #1a1a1a; border: 1px solid #444; border-radius: 4px;
+      color: #e8e8e8; font-size: 12px; padding: 7px 10px; outline: none;
+      font-family: 'Menlo', 'Consolas', monospace;
+    }
+    .form-input:focus { border-color: #0969da; }
+    .form-input::placeholder { color: #555; }
+
+    textarea.form-input { height: 100px; resize: vertical; font-size: 11px; }
+
+    .form-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+    .btn-primary { background: #0969da; color: #fff; padding: 7px 18px; border: none; border-radius: 4px; font-size: 12px; cursor: pointer; font-weight: 500; }
+    .btn-primary:hover { background: #1a7fe8; }
+    .btn-secondary { background: #333; color: #ccc; border: 1px solid #444; padding: 7px 18px; border-radius: 4px; font-size: 12px; cursor: pointer; }
+    .btn-secondary:hover { background: #3a3a3a; }
+
+    /* ── Steps in config modal ── */
+    .steps { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+    .step { display: flex; gap: 12px; align-items: flex-start; }
+    .step-num {
+      flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%;
+      background: #0969da; color: #fff; font-size: 10px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; margin-top: 2px;
+    }
+    .step-body { flex: 1; }
+    .step-title { font-weight: 600; color: #e8e8e8; font-size: 12px; }
+    .step-desc { color: #999; font-size: 11px; margin-top: 2px; }
+
+    .tip {
+      background: #1a2a3a; border-left: 3px solid #0969da;
+      border-radius: 0 4px 4px 0; padding: 8px 12px;
+      font-size: 12px; color: #9cdcfe; margin-top: 8px;
+    }
+    .warning {
+      background: #2a1a00; border-left: 3px solid #e3a008;
+      border-radius: 0 4px 4px 0; padding: 8px 12px;
+      font-size: 12px; color: #e3c000; margin-top: 8px;
+    }
+
+    code {
+      background: #2d2d2d; border: 1px solid #3a3a3a; border-radius: 3px;
+      padding: 1px 5px;
+      font-family: 'Menlo', 'Consolas', monospace; font-size: 11px; color: #ce9178;
+    }
+
+    a { color: #4fc3f7; text-decoration: none; cursor: pointer; }
+    a:hover { text-decoration: underline; }
+
+    /* ── QR code display in modal ── */
+    .qr-wrapper {
+      background: #fff; border-radius: 12px; padding: 16px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4); display: inline-block; margin: 16px 0;
+    }
+    .qr-wrapper img { display: block; width: 200px; height: 200px; image-rendering: pixelated; }
+
+    .badge-success {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #1a3a1a; border: 1px solid #2ea043; border-radius: 20px;
+      padding: 4px 14px; font-size: 12px; color: #3fb950; font-weight: 600;
+    }
+
+    /* ── Toast / notification ── */
+    #toast {
+      position: fixed; top: 16px; right: 16px; z-index: 2000;
+      background: #333; color: #ccc; padding: 10px 18px; border-radius: 6px;
+      font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+      transform: translateY(-20px); opacity: 0; transition: all 0.2s;
+      pointer-events: none;
+    }
+    #toast.visible { transform: translateY(0); opacity: 1; }
+    #toast.success { background: #1a3a1a; border: 1px solid #2ea043; color: #3fb950; }
+    #toast.error { background: #3a1a1a; border: 1px solid #da3633; color: #f85149; }
+
+    /* ── Loading spinner ── */
+    .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #555; border-top-color: #4fc3f7; border-radius: 50%; animation: spin 0.7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <!-- ═══ Toolbar ═══ -->
+  <div id="toolbar">
+    <!-- Device selector -->
+    <select id="device-select" title="模拟机型">
+      <option value="375x667x iPhone%208">iPhone 8 (375×667)</option>
+      <option value="390x844x iPhone%2014" selected>iPhone 14 (390×844)</option>
+      <option value="430x932x iPhone%2014%20Pro%20Max">iPhone 14 Pro Max (430×932)</option>
+      <option value="360x780x Android">Android (360×780)</option>
+      <option value="768x1024x iPad">iPad (768×1024)</option>
+      <option value="390x844x Custom">自定义</option>
+    </select>
+
+    <div class="sep"></div>
+
+    <label title="将鼠标事件转换为触摸事件">
+      <input type="checkbox" id="mouse-touch" checked /> 鼠标模拟触屏
+    </label>
+
+    <div class="sep"></div>
+
+    <button class="btn btn-reload" id="btn-reload" title="重新加载游戏">↺ <span class="btn-label">重载</span></button>
+
+    <div class="sep"></div>
+
+    <button class="btn btn-real-device" id="btn-real-device" title="编译上传到微信平台，生成扫码预览链接">📱 <span class="btn-label">真机预览</span></button>
+    <button class="btn btn-publish" id="btn-publish" title="发布小游戏到微信平台">🚀 <span class="btn-label">发布</span></button>
+
+    <div class="toolbar-right">
+      <button class="btn btn-config" id="btn-config" title="配置 AppID / 密钥">⚙️ <span class="btn-label">配置</span></button>
+    </div>
+  </div>
+
+  <!-- ═══ Game area ═══ -->
+  <div id="game-area">
+    <iframe id="game-frame"
+            src="/game-host"
+            allow="autoplay"
+            sandbox="allow-scripts allow-same-origin"></iframe>
+  </div>
+
+  <!-- ═══ Log panel ═══ -->
+  <div id="log-panel">
+    <div id="log-resize-handle"></div>
+    <div id="log-header">
+      <span id="log-toggle-icon">▼</span>
+      <span id="log-title">CONSOLE</span>
+      <span id="log-count">0 条</span>
+      <button id="btn-clear-log">清空</button>
+    </div>
+    <div id="log-body"></div>
+  </div>
+
+  <!-- ═══ Config Modal ═══ -->
+  <div class="modal-overlay" id="config-modal">
+    <div class="modal">
+      <button class="modal-close" id="config-close">&times;</button>
+      <h2>🔬 真机测试配置</h2>
+      <p class="subtitle">配置 AppID 和代码上传密钥，用于真机预览和发布</p>
+
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <div class="step-title">登录微信公众平台，获取 AppID 和代码上传密钥</div>
+            <div class="step-desc">
+              前往 <a href="https://mp.weixin.qq.com" target="_blank">mp.weixin.qq.com</a>，路径：
+              <strong style="color:#ccc">管理 → 开发管理 → 开发设置 → 小程序代码上传</strong><br/>
+              复制 <code>AppID</code>，点击「生成最新的代码上传密钥」并下载 <code>.key</code> 文件
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <div class="step-title">配置 IP 白名单</div>
+            <div class="step-desc">在同一页面将本机公网 IP 加入白名单，或临时关闭 IP 白名单验证</div>
+            <div class="tip" id="ip-tip">
+              💡 本机公网 IP：<span id="my-ip" style="color:#4fc3f7;font-family:monospace;">获取中...</span>
+              <button id="btn-copy-ip" style="margin-left:8px;padding:2px 8px;background:#333;color:#ccc;border:1px solid #555;border-radius:3px;cursor:pointer;font-size:11px;">复制</button>
+            </div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <div class="step-title">在下方填写 AppID 和密钥后保存</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="config-appid">
+          AppID<span class="required">*</span>
+        </label>
+        <input type="text" id="config-appid" class="form-input" placeholder="wx1234567890abcdef" autocomplete="off" spellcheck="false" />
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="config-key">
+          代码上传密钥<span class="required">*</span>
+          <span class="hint">（.key 文件内容）</span>
+        </label>
+        <textarea id="config-key" class="form-input" placeholder="-----BEGIN PRIVATE KEY-----&#10;MIIEvgIBADANBgkqhkiG9w0BAQEFAAS...&#10;-----END PRIVATE KEY-----&#10;&#10;打开下载的 .key 文件，复制全部内容粘贴到这里"></textarea>
+        <div class="warning">⚠️ 密钥仅保存在本地项目目录的 <code>.minigame-preview.json</code> 文件中，请勿提交到 Git</div>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn-primary" id="config-save">保存配置</button>
+        <button class="btn-secondary" id="config-cancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ QR Code Modal ═══ -->
+  <div class="modal-overlay" id="qrcode-modal">
+    <div class="modal" style="text-align: center;">
+      <button class="modal-close" id="qrcode-close">&times;</button>
+      <div class="badge-success" id="qr-badge">✓ 预览版本上传成功</div>
+      <h2 style="margin-top: 12px;">微信扫码进行真机预览</h2>
+      <p id="qr-appid" style="color: #666; font-size: 12px; font-family: monospace; margin-top: 4px;"></p>
+      <div class="qr-wrapper">
+        <img id="qr-image" src="" alt="预览二维码" />
+      </div>
+      <p style="color: #888; font-size: 13px;">
+        打开 <strong style="color:#ccc">微信</strong>，使用「扫一扫」扫描上方二维码<br/>即可在真实手机上预览小游戏
+      </p>
+    </div>
+  </div>
+
+  <!-- ═══ Publish Modal ═══ -->
+  <div class="modal-overlay" id="publish-modal">
+    <div class="modal">
+      <button class="modal-close" id="publish-close">&times;</button>
+      <h2>🚀 发布小游戏</h2>
+      <p class="subtitle">将游戏代码上传到微信平台</p>
+
+      <div class="form-row">
+        <label class="form-label" for="publish-version">版本号<span class="required">*</span></label>
+        <input type="text" id="publish-version" class="form-input" placeholder="例如：1.0.0" />
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="publish-desc">项目备注</label>
+        <textarea id="publish-desc" class="form-input" placeholder="本次发布的说明（可选）" style="height: 60px;"></textarea>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn-primary" id="publish-confirm">确认发布</button>
+        <button class="btn-secondary" id="publish-cancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Loading Modal ═══ -->
+  <div class="modal-overlay" id="loading-modal">
+    <div class="modal" style="text-align: center; padding: 40px;">
+      <div class="spinner" style="width: 32px; height: 32px; border-width: 3px; margin: 0 auto 16px;"></div>
+      <p id="loading-text" style="color: #aaa; font-size: 14px;">处理中...</p>
+    </div>
+  </div>
+
+  <!-- ═══ Toast ═══ -->
+  <div id="toast"></div>
+  <!-- Custom tooltip -->
+  <div class="x-tooltip" id="x-tooltip"></div>
+
+  <script>
+    (function () {
+      // ── API helper ──────────────────────────────────────────────────────
+      async function api(command) {
+        try {
+          var res = await fetch('/api/command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(command),
+          });
+          var json = await res.json();
+          if (!json.success) throw new Error(json.error || 'Unknown error');
+          return json.data;
+        } catch (err) {
+          throw err;
+        }
+      }
+
+      // ── Toast ───────────────────────────────────────────────────────────
+      var toastEl = document.getElementById('toast');
+      var toastTimer = null;
+      function showToast(msg, type) {
+        if (toastTimer) clearTimeout(toastTimer);
+        toastEl.textContent = msg;
+        toastEl.className = 'visible ' + (type || '');
+        toastTimer = setTimeout(function () {
+          toastEl.className = '';
+        }, 3000);
+      }
+
+      // ── Modal helpers ───────────────────────────────────────────────────
+      function showModal(id) { document.getElementById(id).classList.add('visible'); }
+      function hideModal(id) { document.getElementById(id).classList.remove('visible'); }
+
+      // Close modals by clicking overlay
+      document.querySelectorAll('.modal-overlay').forEach(function (overlay) {
+        overlay.addEventListener('click', function (e) {
+          if (e.target === overlay) overlay.classList.remove('visible');
+        });
+      });
+
+      // Close buttons
+      document.getElementById('config-close').addEventListener('click', function () { hideModal('config-modal'); });
+      document.getElementById('qrcode-close').addEventListener('click', function () { hideModal('qrcode-modal'); });
+      document.getElementById('publish-close').addEventListener('click', function () { hideModal('publish-modal'); });
+
+      // ── Device select & iframe sizing ───────────────────────────────────
+      var deviceSelect = document.getElementById('device-select');
+      var gameArea = document.getElementById('game-area');
+      var gameFrame = document.getElementById('game-frame');
+
+      function applyDeviceSize() {
+        if (!gameFrame) return;
+        var parts = deviceSelect.value.split('x');
+        var w = parseInt(parts[0], 10);
+        var h = parseInt(parts[1], 10);
+        var areaW = gameArea.clientWidth;
+        var areaH = gameArea.clientHeight;
+        var scaleByHeight = areaH / h;
+        var scaleByWidth = areaW / w;
+        var scale = (scaleByHeight <= scaleByWidth) ? scaleByHeight : scaleByWidth;
+        gameFrame.style.width = w + 'px';
+        gameFrame.style.height = h + 'px';
+        gameFrame.style.transform = 'scale(' + scale + ')';
+        gameFrame.style.transformOrigin = 'center top';
+      }
+
+      function reloadFrame() {
+        if (!gameFrame) return;
+        var parts = deviceSelect.value.split('x');
+        var w = parseInt(parts[0], 10);
+        var h = parseInt(parts[1], 10);
+        var model = decodeURIComponent(parts[2] || '');
+        gameFrame.src = '/game-host?w=' + w + '&h=' + h + '&model=' + encodeURIComponent(model);
+      }
+
+      deviceSelect.addEventListener('change', function () { reloadFrame(); });
+      window.addEventListener('resize', applyDeviceSize);
+      gameFrame.addEventListener('load', function () {
+        applyDeviceSize();
+        setTimeout(sendMouseTouchConfig, 150);
+      });
+      applyDeviceSize();
+
+      // ── Mouse → Touch toggle ────────────────────────────────────────────
+      var mouseTouchCheckbox = document.getElementById('mouse-touch');
+      function sendMouseTouchConfig() {
+        if (!gameFrame || !gameFrame.contentWindow) return;
+        gameFrame.contentWindow.postMessage(
+          { type: 'SET_MOUSE_TOUCH', enabled: mouseTouchCheckbox.checked }, '*'
+        );
+      }
+      mouseTouchCheckbox.addEventListener('change', sendMouseTouchConfig);
+
+      // ── Reload button ───────────────────────────────────────────────────
+      document.getElementById('btn-reload').addEventListener('click', function () {
+        reloadFrame();
+        showToast('游戏已重载', 'success');
+      });
+
+      // ── Config button ───────────────────────────────────────────────────
+      document.getElementById('btn-config').addEventListener('click', async function () {
+        try {
+          var config = await api({ type: 'getConfig' });
+          document.getElementById('config-appid').value = config.appId || '';
+          document.getElementById('config-key').value = '';
+          if (config.hasPrivateKey) {
+            document.getElementById('config-key').placeholder = '（密钥已配置，留空则不修改）';
+          }
+        } catch (e) {
+          // Ignore load errors, show empty form
+        }
+        showModal('config-modal');
+        setTimeout(function () { document.getElementById('config-appid').focus(); }, 100);
+      });
+
+      // ── Config save ─────────────────────────────────────────────────────
+      document.getElementById('config-save').addEventListener('click', async function () {
+        var appId = document.getElementById('config-appid').value.trim();
+        var key = document.getElementById('config-key').value.trim();
+
+        if (!appId) {
+          document.getElementById('config-appid').style.borderColor = '#f85149';
+          document.getElementById('config-appid').focus();
+          return;
+        }
+        document.getElementById('config-appid').style.borderColor = '#444';
+
+        try {
+          var cmd = { type: 'saveConfig', appId: appId };
+          if (key) cmd.privateKey = key;
+          await api(cmd);
+          hideModal('config-modal');
+          showToast('配置已保存', 'success');
+        } catch (err) {
+          showToast('保存失败: ' + err.message, 'error');
+        }
+      });
+
+      document.getElementById('config-cancel').addEventListener('click', function () {
+        hideModal('config-modal');
+      });
+
+      // ── Real device preview ─────────────────────────────────────────────
+      document.getElementById('btn-real-device').addEventListener('click', async function () {
+        showModal('loading-modal');
+        document.getElementById('loading-text').textContent = '正在编译并上传到微信平台...';
+
+        try {
+          var result = await api({ type: 'realDevicePreview' });
+          hideModal('loading-modal');
+
+          if (result.configMissing) {
+            showToast('配置不完整，请先填写 AppID 和密钥', 'error');
+            // Auto-open config modal
+            document.getElementById('btn-config').click();
+            return;
+          }
+
+          if (result.qrcodeBase64) {
+            document.getElementById('qr-image').src = result.qrcodeBase64;
+            document.getElementById('qr-appid').textContent = result.appId ? 'AppID: ' + result.appId : '';
+            showModal('qrcode-modal');
+          } else {
+            showToast('真机预览成功', 'success');
+          }
+        } catch (err) {
+          hideModal('loading-modal');
+          showToast('真机预览失败: ' + err.message, 'error');
+        }
+      });
+
+      // ── SSE for real-time push (qrcode from MCP tool calls) ────────────────
+      var eventSource = null;
+      function connectSSE() {
+        if (eventSource) eventSource.close();
+        eventSource = new EventSource('/api/events');
+        eventSource.addEventListener('qrcode', function (e) {
+          var data = JSON.parse(e.data);
+          document.getElementById('qr-image').src = data.qrcodeBase64;
+          document.getElementById('qr-appid').textContent = data.appId ? 'AppID: ' + data.appId : '';
+          hideModal('loading-modal');
+          showModal('qrcode-modal');
+        });
+        eventSource.addEventListener('qrcode-clear', function () {
+          hideModal('qrcode-modal');
+        });
+        eventSource.onerror = function () {
+          // Reconnect after 3 seconds
+          setTimeout(connectSSE, 3000);
+        };
+      }
+      connectSSE();
+
+      // ── Publish ─────────────────────────────────────────────────────────
+      document.getElementById('btn-publish').addEventListener('click', function () {
+        document.getElementById('publish-version').value = '';
+        document.getElementById('publish-desc').value = '';
+        showModal('publish-modal');
+        setTimeout(function () { document.getElementById('publish-version').focus(); }, 100);
+      });
+
+      document.getElementById('publish-cancel').addEventListener('click', function () {
+        hideModal('publish-modal');
+      });
+
+      document.getElementById('publish-confirm').addEventListener('click', async function () {
+        var version = document.getElementById('publish-version').value.trim();
+        if (!version) {
+          document.getElementById('publish-version').style.borderColor = '#f85149';
+          document.getElementById('publish-version').focus();
+          return;
+        }
+        document.getElementById('publish-version').style.borderColor = '#444';
+
+        var desc = document.getElementById('publish-desc').value.trim();
+        hideModal('publish-modal');
+        showModal('loading-modal');
+        document.getElementById('loading-text').textContent = '正在发布 v' + version + '...';
+
+        try {
+          var result = await api({ type: 'publish', version: version, desc: desc });
+          hideModal('loading-modal');
+
+          if (result.configMissing) {
+            showToast('配置不完整，请先填写 AppID 和密钥', 'error');
+            document.getElementById('btn-config').click();
+            return;
+          }
+
+          showToast('🎉 v' + version + ' 发布成功!', 'success');
+        } catch (err) {
+          hideModal('loading-modal');
+          showToast('发布失败: ' + err.message, 'error');
+        }
+      });
+
+      // Enter key in publish version input
+      document.getElementById('publish-version').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') document.getElementById('publish-confirm').click();
+        if (e.key === 'Escape') hideModal('publish-modal');
+      });
+
+      // ── Log panel ───────────────────────────────────────────────────────
+      var logPanel = document.getElementById('log-panel');
+      var logResizeHandle = document.getElementById('log-resize-handle');
+      var logHeader = document.getElementById('log-header');
+      var logBody = document.getElementById('log-body');
+      var logCountEl = document.getElementById('log-count');
+      var logCollapsed = false;
+      var logCount = 0;
+
+      // Drag to resize
+      logResizeHandle.addEventListener('mousedown', function (e) {
+        e.preventDefault();
+        var startY = e.clientY;
+        var startH = logPanel.offsetHeight;
+        logResizeHandle.classList.add('dragging');
+
+        function onMove(ev) {
+          var delta = startY - ev.clientY;
+          var newH = Math.max(28, Math.min(startH + delta, window.innerHeight - 80));
+          logPanel.style.height = newH + 'px';
+          applyDeviceSize();
+        }
+        function onUp() {
+          logResizeHandle.classList.remove('dragging');
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        }
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      });
+
+      logHeader.addEventListener('click', function (e) {
+        if (e.target === document.getElementById('btn-clear-log')) return;
+        logCollapsed = !logCollapsed;
+        logBody.classList.toggle('hidden', logCollapsed);
+        logHeader.classList.toggle('collapsed', logCollapsed);
+      });
+
+      document.getElementById('btn-clear-log').addEventListener('click', function (e) {
+        e.stopPropagation();
+        logBody.innerHTML = '';
+        logCount = 0;
+        logCountEl.textContent = '0 条';
+      });
+
+      function appendLog(level, ts, msg) {
+        logCount++;
+        logCountEl.textContent = logCount + ' 条';
+        var entry = document.createElement('div');
+        entry.className = 'log-entry ' + (level || 'log');
+        var time = document.createElement('span');
+        time.className = 'log-time';
+        var d = new Date(ts);
+        time.textContent = pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+        var text = document.createElement('span');
+        text.className = 'log-msg';
+        text.textContent = msg;
+        entry.appendChild(time);
+        entry.appendChild(text);
+        logBody.appendChild(entry);
+        logBody.scrollTop = logBody.scrollHeight;
+        while (logBody.children.length > 500) logBody.removeChild(logBody.firstChild);
+      }
+
+      function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+
+      // ── Compact toolbar (hide labels when narrow) ────────────────────────
+      var toolbar = document.getElementById('toolbar');
+      var COMPACT_THRESHOLD = 480;
+
+      function updateCompact() {
+        if (toolbar.offsetWidth < COMPACT_THRESHOLD) {
+          toolbar.classList.add('compact');
+        } else {
+          toolbar.classList.remove('compact');
+        }
+      }
+
+      if (window.ResizeObserver) {
+        new ResizeObserver(updateCompact).observe(toolbar);
+      } else {
+        window.addEventListener('resize', updateCompact);
+      }
+      updateCompact();
+
+      // ── Custom tooltip ───────────────────────────────────────────────────
+      var xTooltip = document.getElementById('x-tooltip');
+      var tooltipTimer = null;
+
+      toolbar.addEventListener('mouseover', function (e) {
+        var target = e.target.closest('[title]');
+        if (!target || !toolbar.classList.contains('compact')) return;
+        var text = target.getAttribute('title');
+        if (!text) return;
+        clearTimeout(tooltipTimer);
+        tooltipTimer = setTimeout(function () {
+          var rect = target.getBoundingClientRect();
+          xTooltip.textContent = text;
+          xTooltip.classList.add('visible');
+          var left = rect.left + rect.width / 2;
+          var top = rect.bottom + 6;
+          xTooltip.style.left = left + 'px';
+          xTooltip.style.top = top + 'px';
+          xTooltip.style.transform = 'translateX(-50%)';
+        }, 300);
+      });
+
+      toolbar.addEventListener('mouseout', function (e) {
+        clearTimeout(tooltipTimer);
+        xTooltip.classList.remove('visible');
+      });
+
+      // Listen for log messages from the game iframe
+      window.addEventListener('message', function (e) {
+        var msg = e.data;
+        if (!msg || !msg.type) return;
+        if (msg.type === '__wx_log__') {
+          appendLog(msg.level, msg.ts, msg.msg);
+        }
+      });
+
+      // ── Auto-fetch public IP (via server API to avoid CORS) ────────────────
+      var myIp = '';
+      function fetchPublicIP() {
+        console.log('[IP Fetch] 开始获取公网 IP...');
+        fetch('/api/public-ip')
+          .then(function (res) { return res.json(); })
+          .then(function (data) {
+            console.log('[IP Fetch] 响应:', data);
+            if (data.success && data.ip) {
+              console.log('[IP Fetch] 获取成功:', data.ip, '来源:', data.source);
+              myIp = data.ip;
+              document.getElementById('my-ip').textContent = myIp;
+            } else {
+              throw new Error(data.error || 'Unknown error');
+            }
+          })
+          .catch(function (err) {
+            console.error('[IP Fetch] 获取失败:', err);
+            document.getElementById('my-ip').innerHTML = '获取失败 <span style="font-size:12px;color:#888">(可手动查询)</span>';
+            document.getElementById('my-ip').title = '自动获取失败，请在终端执行 curl ifconfig.me 查询';
+          });
+      }
+      fetchPublicIP();
+
+      document.getElementById('btn-copy-ip').addEventListener('click', function () {
+        if (!myIp) return;
+        navigator.clipboard.writeText(myIp).then(function () {
+          var btn = document.getElementById('btn-copy-ip');
+          var orig = btn.textContent;
+          btn.textContent = '已复制';
+          btn.style.color = '#3fb950';
+          setTimeout(function () {
+            btn.textContent = orig;
+            btn.style.color = '#ccc';
+          }, 1500);
+        });
+      });
+
+    })();
+  </script>
+</body>
+</html>
