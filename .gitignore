@@ -5,6 +5,9 @@ __pycache__
 node_modules
 screenshots
 
+# 资源过滤
+assets/images/**/**
+
 # docs 整体不上传，仅豁免通用规范 docs/specs/
 docs/*
 !docs/specs/

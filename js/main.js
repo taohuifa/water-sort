@@ -1,5 +1,5 @@
 import GameLogic from './core/game.js';
-import { buildLevelsFromConfig, parseJsonc } from './core/levels.js';
+import { buildLevelsFromConfig, parseJsonc, COLORS } from './core/levels.js';
 import Renderer from './render/renderer.js';
 import Anims from './render/anims.js';
 import Audio from './render/audio.js';
@@ -7,6 +7,7 @@ import Ads from './runtime/ads.js';
 
 const CLEARED_KEY = 'juicesort_cleared'; // 已通关关数（解锁进度）
 const SOUND_KEY = 'juicesort_sound'; // 音效开关
+const INTRO_KEY = 'juicesort_big_intro'; // 特殊关首进引导已读标志（R8/S-10）
 // 配置文件用 .json 扩展名（微信代码包读取白名单要求），内容为 JSONC（带注释），
 // 加载时由 parseJsonc 剥离注释
 const LEVEL_CONFIG_PATH = 'assets/config/levels.json'; // 关卡难度曲线配置
@@ -18,6 +19,8 @@ const LEVEL_CONFIG = readConfig(LEVEL_CONFIG_PATH);
 const LEVELS = buildLevelsFromConfig(LEVEL_CONFIG);
 const LEVEL_COUNT = LEVELS.length;
 const ADS_CONFIG = readConfig(ADS_CONFIG_PATH);
+// 特殊关标记（关卡选择页角标用，S-09）
+const SPECIAL_FLAGS = LEVELS.map((l) => l.special === 'bigBottle');
 
 /**
  * 游戏入口：Canvas 初始化、屏幕适配、场景状态机（menu/settings/game）、
@@ -50,6 +53,8 @@ export default class Main {
     this.props = { shuffle: 1, addBottle: 1 }; // 道具剩余次数（每关重置）
     this.adConfirm = null; // 广告补给确认浮层：null | 'shuffle' | 'addBottle'
     this.shuffleSelecting = false; // 打乱选瓶模式：点瓶打乱其层序
+    this.bigIntro = false; // 特殊关首进引导浮层（本机已读后不再弹出）
+    this.bigIntroShown = wx.getStorageSync(INTRO_KEY) === true;
 
     // ---------- 音效（WebAudio 合成，开关持久化） ----------
     this.soundOn = wx.getStorageSync(SOUND_KEY) !== false; // 默认开
@@ -79,6 +84,7 @@ export default class Main {
   /** 菜单 → 关卡选择页 */
   openLevelSelect() {
     this.scene = 'levelSelect';
+    this.renderer.levelScroll = 0; // 每次进入选择页滚动复位
   }
 
   /** 关卡选择页 → 进入指定关卡（前一关通关才解锁） */
@@ -94,11 +100,23 @@ export default class Main {
     this.selected = -1;
     this.winPanel = false;
     this.winDelay = 0;
-    this.props = { shuffle: 1, addBottle: 1 }; // 道具每关重置
+    this.props = { ...LEVELS[idx].props }; // 道具每关按曲线注入（≥10 关出厂 0，仅广告补给）
     this.shuffleSelecting = false;
     this.logic.loadLevel(LEVELS[idx]);
-    this.renderer.setupBoard(this.logic.bottles.length);
+    this.refreshBoard(); // 容量/大瓶参数化布局
     this.renderer.displayedCompleted = 0;
+    // 特殊关首进引导（本机已读不再弹，重置进度后恢复，R8/AC-12）
+    this.bigIntro = !!LEVELS[idx].special && !this.bigIntroShown;
+  }
+
+  /** 按当前逻辑局面的瓶数/容量/大瓶参数重算布局（loadLevel / undo / addBottle 共用，S-08） */
+  refreshBoard() {
+    this.renderer.setupBoard(
+      this.logic.bottles.length,
+      this.logic.capacity,
+      this.logic.bigIndex,
+      this.logic.bigCapacity
+    );
   }
 
   nextLevel() {
@@ -107,11 +125,33 @@ export default class Main {
 
   // ---------- 触摸交互 ----------
 
+  /**
+   * 触摸事件：start 记录起点 → move 累计位移（关卡选择页驱动竖向滚动）→
+   * end 时位移 < 8px 视为点击派发 onTap（拖动滚动不误触卡片）。
+   */
   bindTouch() {
     wx.onTouchStart((e) => {
       const t = e.touches && e.touches[0];
       if (!t) return;
-      this.onTap(t.clientX, t.clientY);
+      this._touchStart = { x: t.clientX, y: t.clientY };
+      this._touchLastY = t.clientY;
+      this._touchMoved = false;
+    });
+    wx.onTouchMove((e) => {
+      const t = e.touches && e.touches[0];
+      if (!t || !this._touchStart) return;
+      const dy = t.clientY - this._touchLastY;
+      this._touchLastY = t.clientY;
+      if (Math.abs(t.clientY - this._touchStart.y) > 8) this._touchMoved = true;
+      if (this.scene === 'levelSelect' && this._touchMoved) {
+        this.renderer.scrollLevels(dy);
+      }
+    });
+    wx.onTouchEnd(() => {
+      if (this._touchStart && !this._touchMoved) {
+        this.onTap(this._touchStart.x, this._touchStart.y);
+      }
+      this._touchStart = null;
     });
   }
 
@@ -155,6 +195,8 @@ export default class Main {
       } else if (this.renderer.inRect(x, y, this.renderer.settingsResetBtn)) {
         this.audio.play('button');
         this.resetProgress();
+      } else if (this.renderer.inRect(x, y, this.renderer.settingsKeyBtn)) {
+        this.openKeyInput();
       }
       return;
     }
@@ -164,6 +206,17 @@ export default class Main {
       if (this.renderer.inRect(x, y, this.renderer.nextBtn)) {
         this.audio.play('button');
         this.nextLevel();
+      }
+      return;
+    }
+
+    // 特殊关首进引导浮层（点「开始挑战」关闭并记住已读；期间屏蔽其他输入）
+    if (this.bigIntro) {
+      if (this.renderer.inRect(x, y, this.renderer.bigIntroBtn)) {
+        this.audio.play('button');
+        this.bigIntro = false;
+        this.bigIntroShown = true;
+        wx.setStorageSync(INTRO_KEY, true);
       }
       return;
     }
@@ -255,15 +308,60 @@ export default class Main {
     this.renderer.showToast(this.soundOn ? '音效已开启' : '音效已关闭');
   }
 
-  /** 清除关卡存档，解锁进度归零 */
+  /** 清除关卡存档，解锁进度归零；特殊关引导已读标志一并重置（AC-12） */
   resetProgress() {
     wx.removeStorageSync(CLEARED_KEY);
+    wx.removeStorageSync(INTRO_KEY);
     this.cleared = 0;
+    this.bigIntroShown = false;
     this.renderer.showToast('已重置，将从第 1 关开始');
+  }
+
+  /**
+   * 设置页兑换码输入：微信原生弹窗输入框（wx.showModal editable），
+   * 确认后按 GM 指令处理。无该 API 的环境（Node 冒烟测试）降级为提示。
+   */
+  openKeyInput() {
+    this.audio.play('button');
+    if (typeof wx === 'undefined' || !wx.showModal) {
+      this.renderer.showToast('当前环境不支持输入');
+      return;
+    }
+    wx.showModal({
+      title: '输入兑换码',
+      editable: true,
+      placeholderText: '请输入兑换码',
+      success: (res) => {
+        if (res.confirm) this.applyKey(res.content);
+      },
+    });
+  }
+
+  /** 校验输入的兑换码。unlock_all：解锁全部关卡（测试验收用），大小写不敏感。 */
+  applyKey(code) {
+    const key = String(code == null ? '' : code).trim().toLowerCase();
+    if (!key) return;
+    if (key === 'unlock_all') {
+      this.cleared = LEVEL_COUNT;
+      wx.setStorageSync(CLEARED_KEY, this.cleared);
+      this.renderer.showToast(`兑换成功：已解锁全部 ${LEVEL_COUNT} 关`);
+      this.audio.play('win');
+    } else {
+      this.renderer.showToast('兑换码无效');
+      this.audio.play('invalid');
+    }
   }
 
   tapBottle(idx) {
     const { logic } = this;
+
+    // 锁定瓶：不可选中/切换选中，播放非法反馈（R4/R5 锁瓶交互）
+    if (logic.isLocked(idx)) {
+      this.audio.play('invalid');
+      this.anims.addShake(idx);
+      this.selected = -1;
+      return;
+    }
 
     // 未选中：选中非空瓶
     if (this.selected === -1) {
@@ -308,6 +406,17 @@ export default class Main {
     // 非法：抖动提示 + 切换选中（目标可作源时）
     this.audio.play('invalid');
     this.anims.addShake(idx);
+    // 大瓶瓶口颜色限制：错色倒入时明确提示限定色
+    if (
+      logic.special === 'bigBottle' &&
+      idx === logic.bigIndex &&
+      logic.bigColor >= 0 &&
+      logic.bottles[this.selected] &&
+      logic.bottles[this.selected].length > 0
+    ) {
+      const def = COLORS[logic.bigColor];
+      if (def) this.renderer.showToast(`大瓶只收「${def.name}」`);
+    }
     this.selected = logic.bottles[idx].length > 0 ? idx : -1;
   }
 
@@ -333,7 +442,7 @@ export default class Main {
       this.selected = -1;
       this.renderer.displayedCompleted = this.logic.completed.length;
       // 加瓶/撤加瓶会改变瓶数，布局需重算（幂等）
-      this.renderer.setupBoard(this.logic.bottles.length);
+      this.refreshBoard();
     }
   }
 
@@ -376,7 +485,7 @@ export default class Main {
       this.audio.play('button');
       this.props.addBottle--;
       this.selected = -1;
-      this.renderer.setupBoard(this.logic.bottles.length);
+      this.refreshBoard();
       this.renderer.showToast('已增加一个空瓶');
     }
   }
@@ -426,6 +535,8 @@ export default class Main {
       levelIndex: this.levelIndex,
       shuffleSelecting: this.shuffleSelecting,
       stuck: this.scene === 'game' && !this.logic.hasAnyMove(),
+      bigIntro: this.bigIntro,
+      specials: SPECIAL_FLAGS,
     });
 
     requestAnimationFrame(this.tick);

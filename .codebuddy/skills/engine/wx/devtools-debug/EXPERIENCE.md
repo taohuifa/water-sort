@@ -131,3 +131,30 @@ env 设 `ELECTRON_RUN_AS_NODE=1`（Electron 以 as-Node 模式跑 JS）。
 - `get_simulator_console` 参数是 `command: "grep -n -i <pattern>"`（不是 grep/n 字段）
 - wxmcp.mjs 合并了此前 8 个散装 MCP 脚本的功能（call/schema/shot/refresh/console/eval/verify/flow）
 - skill 目录从 `.codebuddy/skills/wx-devtools-uiauto/` 迁移至 `.codebuddy/skills/engine/wx/devtools-debug/`
+
+## 2026-10-25 追加 2（视觉调试）
+
+- 视觉验证用「红块探针」必须画在 `draw()` 末尾（不透明背景图之后）：画在
+  drawBackground 之前会被背景图完全盖住，造成"编译不生效"的误判（链路其实是好的）
+- refresh 后等 ~10s 再截图确认为必要：1s 内拍到的是重启前旧帧（与既有 6-10s 记录一致）
+- `simulator_screenshot` 的 `imageWidth` 参数实测不生效（固定 289x625 长边优化），
+  需要看细节时别指望放大，靠多次迭代对比
+- **IDE 编译会"卡死"（refresh 返回 success 但bundle 不更新）**：表现为连续多次 refresh+
+  截图内容哈希不变。解法：先调 `open_project_window`（返回 reuse 也有效）唤醒 IDE，
+  再 refresh 即恢复正常。判断是否陈旧帧：改一个必然可见的场景变化（如 debug 自动进关）
+  对比截图；单靠静态场景截图哈希相同不能区分"没重编译"和"画面没变"
+- 批量生成素材时，文生图对"细长竖条" subjects 有系统性画细倾向（要求 1:3 实出 1:12）。
+  对策：prompt 强调"非常粗壮，宽度占画面宽度 85% 以上"+ 用 1:2 画布，出图后裁边拉伸到目标比例
+
+## 2026-10-25 追加 3（白模板滤色）
+
+- **本项目 devtools 环境（libVersion 3.17.4）`wx.createOffscreenCanvas` 不存在**（game 上下文
+  报 not a function）。小游戏标准兜底：`wx.createCanvas()` 第二次及以后调用返回离屏画布
+  （首次调用才是上屏 canvas），`getImageData/putImageData/drawImage(canvas)` 全部可用。
+  离屏画布代码写成两者兼容：`typeof wx.createOffscreenCanvas === 'function' ? ... : wx.createCanvas()`
+- 滤色（tint）方案落地验证：比值模板（byte = ratio × 127.5，2.0 高光余量）× 目标色逐像素
+  乘法，PowerShell 侧从现有贴图反推（各色比值中位数 0.97~1.08，模型成立）；奶茶杯 8 张
+  宽度不一（69~77px）无法逐像素对齐，改从单张（drink-4 蓝莓，色度与中性色分离最好）按
+  chroma smoothstep(18,48) 拆 base/果汁两层，自重组误差 0.15%
+- 滤色缓存构建失败会静默 catch 降级，截图看不出来——必须加一次性 console 标记
+  （grep console）确认缓存真建成了，再清掉标记

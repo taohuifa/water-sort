@@ -56,6 +56,18 @@
         "type": "folder"
       },
       {
+        "value": "assets/images/liquid-src",
+        "type": "folder"
+      },
+      {
+        "value": "assets/images/drink-src",
+        "type": "folder"
+      },
+      {
+        "value": "assets/images/backup",
+        "type": "folder"
+      },
+      {
         "value": "package.json",
         "type": "file"
       },

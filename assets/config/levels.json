@@ -1,8 +1,8 @@
 {
   // ═══════════════════════════════════════════════════════════
-  // 缤纷果汁铺 · 关卡难度曲线配置（JSONC：JSON with Comments）
-  // 全部关卡（第 1 ~ levelCount 关）由本配置程序化生成，
-  // 调整参数即可改变关卡数量与难度曲线，无需改动代码。
+  // 缤纷果汁铺 · 关卡难度曲线配置 v2（30 关扩展版，JSONC）
+  // 生成规则：曲线段(取 ≤ 当前关的最大段) 为默认值，
+  // overrides[关卡号] 可逐关覆盖任意字段，优先级最高。
   //
   // 说明：本文件内容为 JSONC（JSON + 注释）。
   // 微信小游戏仅允许读取 .json 等白名单扩展名的代码包文件
@@ -10,12 +10,63 @@
   // 加载时由 js/core/levels.js 的 parseJsonc 剥离注释后解析。
   // 加载链路：js/main.js 读取本文件 → parseJsonc → 生成关卡列表
   // ═══════════════════════════════════════════════════════════
-  "levelCount": 10, // 关卡总数
+  "levelCount": 30, // 关卡总数：10 → 30
+  "seedBase": 101, // 随机种子基准（seed = 基准 + 关卡号，同 seed 局面可复现）
+
+  // —— 颜色曲线 ——
   "startColors": 2, // 第 1 关颜色数
-  "maxColors": 7, // 颜色数上限（颜色数每 2 关 +1，封顶此值）
-  "baseEmpties": 2, // 基础空瓶数
-  "extraEmptyFromLevel": 7, // 第几关起额外 +1 空瓶（颜色变多时缓和难度）
-  "hiddenFromLevel": 4, // 第几关起出现「?」隐藏层
-  "hiddenMax": 3, // 隐藏层最大数量（出现后每 2 关 +1，封顶此值）
-  "seedBase": 101 // 随机种子基准（seed = 基准 + 关卡号，同 seed 局面可复现）
+  "maxColors": 8, // 颜色数上限：7 → 8（抹茶登场，全色启用）
+  "colorStepEvery": 2, // 每几关颜色 +1
+
+  // —— 空瓶余量曲线（分段阶梯；未配置时回退 baseEmpties 恒定值）——
+  "baseEmpties": 2, // 兼容旧字段：无 emptiesCurve 时的恒定空瓶数
+  "extraEmptyFromLevel": 99, // 旧字段保留兼容（新曲线不使用）
+  "emptiesCurve": [
+    { "fromLevel": 1, "value": 2 }, // 新手引导期：2 个空瓶
+    { "fromLevel": 15, "value": 1 } // 第 15 关起降为 1（全局最低 1）
+  ],
+
+  // —— 容量曲线（每瓶层数 3~8；未配置时恒为 4）——
+  "capacityCurve": [
+    { "fromLevel": 1, "value": 4 }, // 第 1~19 关：标准 4 层
+    { "fromLevel": 20, "value": 3 }, // 第 20~21 关：小容量
+    { "fromLevel": 22, "value": 5 } // 第 22 关起：高瓶
+  ],
+
+  // —— 问号隐藏层曲线 ——
+  "hiddenFromLevel": 4, // 第 4 关起出现
+  "hiddenMax": 5, // 上限：3 → 5
+  "hiddenStepEvery": 2, // 出现后每几关 +1
+
+  // —— 道具出厂次数曲线 ——
+  "props": {
+    "freeUntilLevel": 9 // ≤9 关：打乱/加瓶各 1 次；≥10 关：0 次（仅广告补给）
+  },
+
+  // —— 新机制启用关卡（未配置 = 全程关闭）——
+  "mechanics": {
+    "condLock": { "fromLevel": 24, "need": 2 }, // 条件解锁瓶：完成 N 个成品解锁
+    "keyLock": { "fromLevel": 27 }, // 钥匙解锁瓶：倒出钥匙层解锁
+    "noEmptyStart": { "fromLevel": 29 } // 无空瓶开局（全瓶有内容）
+  },
+
+  // —— 逐关覆盖（键为关卡号；优先级最高）——
+  // 10/12/21/22/29 为对齐 PRD §4 总表的补齐项（颜色/隐藏/容量/锁缓冲）
+  // 特殊关（大瓶收集，PRD-特殊关卡-大瓶收集.md §7 拍板 1=A/2=D）：L10/L20/L30 原位替换，
+  // 总关数/存档 cleared 语义/解锁链零变动；v1 不叠加隐藏层/锁/无空瓶（配置层强制清零）
+  "overrides": {
+    "10": { "special": "bigBottle", "colors": 4, "capacity": 4, "bigCapacity": 8, "empties": 2, "hiddenCount": 0 }, // 首个特殊关：纯机制教学（8 层大瓶 ≈ 2 个满普通瓶）
+    "12": { "colors": 7, "hiddenCount": 4 },
+    "20": { "special": "bigBottle", "colors": 5, "capacity": 4, "bigCapacity": 6, "empties": 2, "hiddenCount": 0, "condLockCount": 0, "keyLockCount": 0 }, // 中段：颜色压力 +1，大瓶略小
+    "21": { "colors": 6, "hiddenCount": 4 },
+    "22": { "colors": 6, "hiddenCount": 4 }, // 容量 5 首秀，降颜色缓冲难度
+    "23": { "colors": 7 },
+    "24": { "capacity": 4, "condLockCount": 1 },
+    "25": { "capacity": 4, "condLockCount": 1 },
+    "26": { "capacity": 5, "condLockCount": 1, "condLockNeed": 3 },
+    "27": { "capacity": 4, "condLockCount": 0, "keyLockCount": 1 }, // 钥匙锁首秀：纯机制教学
+    "28": { "capacity": 4, "condLockCount": 1, "keyLockCount": 1 },
+    "29": { "colors": 7, "capacity": 4, "hiddenCount": 4, "condLockCount": 0, "keyLockCount": 0 }, // 无空瓶开局首秀：纯机制教学，降一档缓冲
+    "30": { "special": "bigBottle", "colors": 6, "capacity": 5, "bigCapacity": 8, "empties": 2, "hiddenCount": 0, "condLockCount": 0, "keyLockCount": 0, "noEmptyStart": false } // 终局特殊关：cap5 普通瓶 + 8 层大瓶收官
+  }
 }
