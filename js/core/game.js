@@ -28,6 +28,8 @@ export default class GameLogic {
     this.special = null; // 特殊关类型（v1 仅 'bigBottle'，普通关为 null）
     this.bigIndex = -1; // 大瓶在 bottles 中的下标（特殊关固定末位，普通关 -1）
     this.bigCapacity = 0; // 大瓶容量（层数，特殊关 = 目标色每色总量）
+    this.mix = false; // 混合容量关标记（PRD-混合容量瓶）
+    this.caps = []; // 与 bottles 平行的每瓶容量数组（仅混合关填充，其余关为空）
     this.bigColor = -1; // 大瓶限定收集色（瓶口颜色限制：只收该颜色，普通关 -1）
   }
 
@@ -44,12 +46,16 @@ export default class GameLogic {
     noEmptyStart = false,
     special = null,
     bigCapacity = 0,
+    mix = false,
   }) {
     this.capacity = capacity;
     this.colorCount = colors;
     this.noEmptyStart = noEmptyStart;
     this.special = special === 'bigBottle' ? 'bigBottle' : null;
     this.bigCapacity = this.special ? bigCapacity : 0;
+    // 混合容量瓶（PRD-混合容量瓶）：v1 不与大瓶叠加（配置层强制，双保险）
+    this.mix = !!mix && !this.special;
+    this.caps = []; // 与 bottles 平行的每瓶容量数组（仅混合关填充）
     let gen;
     if (this.special) {
       // 特殊关（大瓶收集，R1/R2）：大瓶专用发牌分支，大瓶固定排在 bottles 末位
@@ -58,6 +64,12 @@ export default class GameLogic {
       });
       this.bigIndex = gen.bottles.length - 1;
       this.bigColor = gen.bigColor; // 限定收集色（瓶口颜色限制）
+    } else if (this.mix) {
+      // 混合容量关：全瓶容量 3~5 随机（PRD-混合容量瓶 §2）
+      this.bigIndex = -1;
+      this.bigColor = -1;
+      gen = this._generateMixed(colors, noEmptyStart ? 0 : empties, seed);
+      this.caps = gen.caps;
     } else {
       this.bigIndex = -1;
       this.bigColor = -1;
@@ -66,12 +78,12 @@ export default class GameLogic {
         condLockCount,
         condLockNeed,
         keyLockCount,
+        hiddenCount,
       });
     }
     this.bottles = gen.bottles;
     this.locks = gen.locks;
     this.unlocked = gen.locks.map(() => false);
-    if (hiddenCount > 0) this._markHidden(hiddenCount, seed * 31 + 7, gen.keyLayer);
     this._revealTops();
     this.completed = [];
     this.removed = new Set();
@@ -82,13 +94,23 @@ export default class GameLogic {
   // ---------- 关卡生成：随机分层发牌 + 布锁 + 求解器验证，保证必有解 ----------
 
   /**
-   * 生成含锁关卡：
-   * 发牌 → 随机布置条件锁（含内容瓶）/ 钥匙锁（锁既有内容瓶 + 钥匙层）→ 带锁求解验证。
+   * 生成含锁/隐藏关卡（v3 分级管线，规范要求：不用道具必有解）：
+   * ① 瓶结构 —— 数量 / 每瓶容量（大小）+ 空瓶
+   * ② 机制位置 —— 锁瓶与钥匙深度、隐藏槽位（仅依赖结构、不依赖液体颜色；
+   *    散打关瓶装量由 ③ 决定 → 机制延后到 ③ 之后按实际装量放置）
+   * ③ 液体打散 —— 洗混装瓶（②选定的隐藏槽位在此应用负编码）
+   * ④ 验证 —— 开局无满纯色 + DFS 求解器；不合格换 attempt 重洗
    * 重试以总耗时预算（5s）为上限兜底（Q8=B）：1 空瓶大关随机发牌可解率低（~3%），
    * 单次验证极快（<1ms），固定 60 次重试不足，按预算可跑数千次直至命中可解局面。
    */
   _generate(colors, empties, seed, opts = {}) {
-    const { noEmptyStart = false, condLockCount = 0, condLockNeed = 2, keyLockCount = 0 } = opts;
+    const {
+      noEmptyStart = false,
+      condLockCount = 0,
+      condLockNeed = 2,
+      keyLockCount = 0,
+      hiddenCount = 0,
+    } = opts;
     const nodeLimit = this.capacity >= 5 ? 200000 : 60000; // nodeLimit 随容量配置化（Q8=B）
     const deadline = Date.now() + 5000; // 单关生成总耗时预算
     const MAX_ATTEMPTS = 20000; // 防御性硬上限（正常预算内远达不到）
@@ -97,39 +119,37 @@ export default class GameLogic {
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       if (attempt > 0 && Date.now() > deadline) break;
       const dealSeed = seed + attempt * 997;
-      const bottles = noEmptyStart
-        ? this._randomDealScattered(colors, dealSeed)
-        : this._randomDeal(colors, empties, dealSeed);
-      // 开局不允许直接存在已完成的满瓶纯色
-      if (bottles.some((b) => this._isFullMono(b))) {
-        last = { bottles, locks: [] };
-        continue;
-      }
-      // 布锁（与发牌同 seed 派生，同 seed 可复现；重试随 attempt 变化锁位）
-      const rng = new Rng(dealSeed + 7919);
-      const locks = [];
+      const rng = new Rng(dealSeed); // 与打散同 rng 序列（同 seed 可复现；重试随 attempt 变化）
+      let locks = [];
       let keyLayer = null;
-      const condCands = bottles.map((b, i) => (b.length > 0 ? i : -1)).filter((i) => i >= 0);
-      for (let i = 0; i < condLockCount && condCands.length > 0; i++) {
-        // 条件锁瓶（方案 B）：含内容的真约束瓶
-        locks.push({ bottle: condCands.splice(rng.int(condCands.length), 1)[0], type: 'cond', need: condLockNeed });
+      let bottles;
+      if (noEmptyStart) {
+        // 散打关：③ 打散先定瓶装量 → 机制延后（锁按实际装量，隐藏 _markHidden）
+        bottles = this._dealScattered(colors, rng);
+        const post = this._placeMechanismsPostDeal(rng, bottles, { condLockCount, condLockNeed, keyLockCount });
+        locks = post.locks;
+        keyLayer = post.keyLayer;
+        if (hiddenCount > 0) this._markHidden(bottles, hiddenCount, dealSeed + 31, keyLayer);
+      } else {
+        // 标准关：② 机制位置（结构已知 = 前 colors 瓶满 + empties 空）→ ③ 打散 → 应用隐藏编码
+        const mech = this._placeMechanisms(rng, {
+          colors,
+          condLockCount,
+          condLockNeed,
+          keyLockCount,
+          hiddenCount,
+        });
+        locks = mech.locks;
+        keyLayer = mech.keyLayer;
+        bottles = this._dealStandard(colors, empties, rng);
+        if (mech.hiddenSlots) {
+          for (const [bi, li] of mech.hiddenSlots) bottles[bi][li] = -(bottles[bi][li] + 1);
+        }
       }
-      for (let i = 0; i < keyLockCount; i++) {
-        // 钥匙锁瓶（方案 B，2026-10-25 调整）：锁在既有内容瓶上（真约束，不追加空瓶）；
-        // 不与任何锁瓶（含本钥匙锁瓶）重叠
-        const lockCands = bottles
-          .map((b, bi) => (b.length > 0 && !locks.some((l) => l.bottle === bi) ? bi : -1))
-          .filter((bi) => bi >= 0);
-        if (lockCands.length === 0) continue; // 极端无候选（几乎不可能），跳过该锁
-        const lockIdx = lockCands[rng.int(lockCands.length)];
-        const keyCands = bottles
-          .map((b, bi) => (b.length >= 2 && bi !== lockIdx && !locks.some((l) => l.bottle === bi) ? bi : -1))
-          .filter((bi) => bi >= 0);
-        if (keyCands.length === 0) continue;
-        const kb = keyCands[rng.int(keyCands.length)];
-        const kd = rng.int(bottles[kb].length - 1); // 从底数第 0~len-2 层（非顶层）
-        locks.push({ bottle: lockIdx, type: 'key', keyBottle: kb, keyDepth: kd });
-        keyLayer = { bottle: kb, depth: kd }; // v1 仅 1 个钥匙，供 _markHidden 排除
+      // ④ 验证：开局不允许直接存在已完成的满瓶纯色
+      if (bottles.some((b) => this._isFullMono(b))) {
+        last = { bottles, locks };
+        continue;
       }
       const lockInfo = {
         condLocks: locks.filter((l) => l.type === 'cond'),
@@ -147,11 +167,82 @@ export default class GameLogic {
   }
 
   /**
-   * 随机分层发牌：把 colors 色 × capacity 层随机洗混后依次装满前 colors 个瓶，
+   * 机制位置放置（阶段②，标准关）：仅依赖瓶结构（前 colors 瓶满 + empties 空），
+   * 不依赖液体颜色。返回 hiddenSlots = [[瓶下标, 层下标]]，由调用方在 ③ 打散后应用负编码。
+   */
+  _placeMechanisms(rng, { colors, condLockCount = 0, condLockNeed = 2, keyLockCount = 0, hiddenCount = 0 }) {
+    const locks = [];
+    let keyLayer = null;
+    // 条件锁瓶（方案 B）：内容瓶中选
+    const condCands = [];
+    for (let i = 0; i < colors; i++) condCands.push(i);
+    for (let i = 0; i < condLockCount && condCands.length > 0; i++) {
+      locks.push({ bottle: condCands.splice(rng.int(condCands.length), 1)[0], type: 'cond', need: condLockNeed });
+    }
+    // 钥匙锁瓶（方案 B）：锁在内容瓶上（不与任何锁瓶重叠）；钥匙层 = 内容瓶非顶层
+    for (let i = 0; i < keyLockCount; i++) {
+      const lockCands = [];
+      for (let bi = 0; bi < colors; bi++) if (!locks.some((l) => l.bottle === bi)) lockCands.push(bi);
+      if (lockCands.length === 0) continue; // 极端无候选（几乎不可能），跳过该锁
+      const lockIdx = lockCands[rng.int(lockCands.length)];
+      const keyCands = [];
+      for (let bi = 0; bi < colors; bi++) {
+        if (bi !== lockIdx && !locks.some((l) => l.bottle === bi)) keyCands.push(bi);
+      }
+      if (keyCands.length === 0) continue;
+      const kb = keyCands[rng.int(keyCands.length)];
+      const kd = rng.int(Math.max(1, this.capacity - 1)); // 从底数第 0~cap-2 层（非顶层）
+      locks.push({ bottle: lockIdx, type: 'key', keyBottle: kb, keyDepth: kd });
+      keyLayer = { bottle: kb, depth: kd }; // v1 仅 1 个钥匙，供隐藏槽位排除
+    }
+    // 隐藏槽位：内容瓶非顶层（避开钥匙层）
+    const cands = [];
+    for (let bi = 0; bi < colors; bi++) {
+      for (let li = 0; li < this.capacity - 1; li++) {
+        if (keyLayer && bi === keyLayer.bottle && li === keyLayer.depth) continue;
+        cands.push([bi, li]);
+      }
+    }
+    const hiddenSlots = [];
+    for (let i = 0; i < hiddenCount && i < cands.length; i++) {
+      const j = i + rng.int(cands.length - i);
+      [cands[i], cands[j]] = [cands[j], cands[i]];
+      hiddenSlots.push(cands[i]);
+    }
+    return { locks, keyLayer, hiddenSlots };
+  }
+
+  /** 机制位置放置（打散后，散打关用）：锁瓶/钥匙深度按实际瓶装量选取 */
+  _placeMechanismsPostDeal(rng, bottles, { condLockCount = 0, condLockNeed = 2, keyLockCount = 0 } = {}) {
+    const locks = [];
+    let keyLayer = null;
+    const condCands = bottles.map((b, i) => (b.length > 0 ? i : -1)).filter((i) => i >= 0);
+    for (let i = 0; i < condLockCount && condCands.length > 0; i++) {
+      locks.push({ bottle: condCands.splice(rng.int(condCands.length), 1)[0], type: 'cond', need: condLockNeed });
+    }
+    for (let i = 0; i < keyLockCount; i++) {
+      const lockCands = bottles
+        .map((b, bi) => (b.length > 0 && !locks.some((l) => l.bottle === bi) ? bi : -1))
+        .filter((bi) => bi >= 0);
+      if (lockCands.length === 0) continue;
+      const lockIdx = lockCands[rng.int(lockCands.length)];
+      const keyCands = bottles
+        .map((b, bi) => (b.length >= 2 && bi !== lockIdx && !locks.some((l) => l.bottle === bi) ? bi : -1))
+        .filter((bi) => bi >= 0);
+      if (keyCands.length === 0) continue;
+      const kb = keyCands[rng.int(keyCands.length)];
+      const kd = rng.int(bottles[kb].length - 1); // 从底数第 0~len-2 层（非顶层）
+      locks.push({ bottle: lockIdx, type: 'key', keyBottle: kb, keyDepth: kd });
+      keyLayer = { bottle: kb, depth: kd };
+    }
+    return { locks, keyLayer };
+  }
+
+  /**
+   * 液体打散（阶段③，标准关）：colors 色 × capacity 层洗混后依次装满前 colors 个瓶，
    * 再附加 empties 个空瓶。
    */
-  _randomDeal(colors, empties, seed) {
-    const rng = new Rng(seed);
+  _dealStandard(colors, empties, rng) {
     const layers = [];
     for (let c = 0; c < colors; c++) {
       for (let i = 0; i < this.capacity; i++) layers.push(c);
@@ -170,12 +261,11 @@ export default class GameLogic {
   }
 
   /**
-   * 无空瓶开局发牌（R3 scattered，Q2=A）：colors 色 × capacity 层随机分布到
-   * colors + 1 个瓶，每瓶层数 ∈ [2, capacity]（允许满混合瓶，禁止满纯色由外层校验），
+   * 液体打散（阶段③，散打关 R3/Q2=A）：colors 色 × capacity 层随机分布到
+   * colors + 1 个瓶，每瓶层数 ∈ [2, capacity]（允许满混合瓶，禁止满纯色由 ④ 校验），
    * 总层数 < (colors+1)×capacity 天然保证至少 1 瓶非满，开局必有合法步。
    */
-  _randomDealScattered(colors, seed) {
-    const rng = new Rng(seed);
+  _dealScattered(colors, rng) {
     const layers = [];
     for (let c = 0; c < colors; c++) {
       for (let i = 0; i < this.capacity; i++) layers.push(c);
@@ -265,6 +355,67 @@ export default class GameLogic {
   }
 
   /**
+   * 混合容量关生成（PRD-混合容量瓶 §2，v2 按用户拍板调整）：
+   * ① 每色总量随机 3~5（= 该色的目标容量，收瓶容量与之匹配）——
+   *    「满纯色 = 完整色」，不存在拆色残留死局（v1 恒 = capacity 的规则废弃）；
+   * ② 瓶子 = colors 个内容瓶（容量 = 各色总量的洗牌错位多重集）+ empties 个空瓶（随机 3~5）；
+   * ③ 装牌 = 全部层洗混后依次装满内容瓶（每瓶装满自身容量），空瓶留空；
+   * 求解器按 per-bottle 容量验证（状态 key 编入容量，cap3 与 cap5 瓶不可互换去重）。
+   */
+  _generateMixed(colors, empties, seed) {
+    const nodeLimit = this.capacity >= 5 ? 200000 : 60000;
+    const deadline = Date.now() + 5000;
+    const MAX_ATTEMPTS = 20000;
+    const n = colors + empties;
+    const sizes = [this.capacity - 1, this.capacity, this.capacity + 1]; // 4 时为 3~5
+    let last = { bottles: [], caps: [] };
+    this.lastGenSolvable = false;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      if (attempt > 0 && Date.now() > deadline) break;
+      const rng = new Rng(seed + attempt * 997);
+      // ① 每色总量（= 该色目标瓶容量）
+      const totals = [];
+      let total = 0;
+      for (let c = 0; c < colors; c++) {
+        const v = sizes[rng.int(3)];
+        totals.push(v);
+        total += v;
+      }
+      // ② 内容瓶容量 = 各色总量洗牌错位（多重集一致 → 每色必有同容量瓶可收纳），空瓶随机 3~5
+      const caps = totals.slice();
+      for (let i = caps.length - 1; i > 0; i--) {
+        const j = rng.int(i + 1);
+        [caps[i], caps[j]] = [caps[j], caps[i]];
+      }
+      for (let e = 0; e < empties; e++) caps.push(sizes[rng.int(3)]);
+      // ③ 装牌：全部层洗混，依次装满内容瓶
+      const layers = [];
+      for (let c = 0; c < colors; c++) {
+        for (let i = 0; i < totals[c]; i++) layers.push(c);
+      }
+      for (let i = layers.length - 1; i > 0; i--) {
+        const j = rng.int(i + 1);
+        [layers[i], layers[j]] = [layers[j], layers[i]];
+      }
+      const bottles = [];
+      let k = 0;
+      for (let i = 0; i < n; i++) {
+        const take = Math.min(caps[i], total - k);
+        bottles.push(take > 0 ? layers.slice(k, k + take) : []);
+        k += take;
+      }
+      // 开局不允许直接存在满纯色瓶（按各瓶自身容量判定）
+      last = { bottles, caps };
+      if (bottles.some((b, i) => this._isFullMono(b, caps[i]))) continue;
+      if (this._solvable(bottles, nodeLimit, null, null, null, caps)) {
+        this.lastGenSolvable = true;
+        return { bottles, caps, locks: [], keyLayer: null };
+      }
+    }
+    return { bottles: last.bottles, caps: last.caps, locks: [], keyLayer: null };
+  }
+
+  /**
    * 可解性验证：DFS 搜索（与游戏规则完全一致的模拟，含完成清空与锁瓶过滤）。
    * 启发式：完成腾瓶 > 腾空源瓶 > 同色目标（越接近满越优）> 空瓶目标；
    * 状态 key 规范化（自由瓶内容排序）合并排列等价状态，大幅剪枝。
@@ -273,14 +424,18 @@ export default class GameLogic {
    * - keyLocks：钥匙锁瓶（精确模拟钥匙层倒出：keyOut 布尔并入状态 key——
    *   剔除模型的简化在 L30 三机制叠加时过保守（可解率≈0），改为与游戏规则一致的模拟）。
    */
-  _solvable(bottles, nodeLimit = 60000, removedSet = null, lockInfo = null, bigInfo = null) {
+  _solvable(bottles, nodeLimit = 60000, removedSet = null, lockInfo = null, bigInfo = null, mixCaps = null) {
     const cap = this.capacity;
     const bigIdx = bigInfo ? bigInfo.idx : -1; // 特殊关：大瓶下标（普通关 -1）
     const bigCap = bigInfo ? bigInfo.capacity : cap; // 大瓶容量（R4/S-05）
+    // 每瓶容量（混合关 = mixCaps；其余关 = 大瓶 bigCap / 统一 cap）
+    const capAt = (i) => (mixCaps ? mixCaps[i] : i === bigIdx ? bigCap : cap);
     const bigColor = bigInfo && bigInfo.color >= 0 ? bigInfo.color : -1; // 大瓶限定色（-1 = 不限制）
     const condLocks = (lockInfo && lockInfo.condLocks) || [];
     const keyLocks = (lockInfo && lockInfo.keyLocks) || [];
-    const bs = bottles.map((b) => b.slice());
+    // 隐藏层负编码统一解码为真实色：游戏对顶层自动揭示，隐藏不构成额外限制，
+    // 求解器按真实色搜索与实际玩法等价（跨隐藏段的连续倒可拆成多次单层倒，可解性不变）
+    const bs = bottles.map((b) => b.slice().map((c) => (c >= 0 ? c : -c - 1)));
     const n = bs.length;
     const done = new Set(removedSet || []); // 已收走的瓶（含搜索中新完成的），不参与倒水
     const visited = new Set();
@@ -301,7 +456,7 @@ export default class GameLogic {
     };
 
     const amountOf = (f, t, ti) => {
-      const tcap = ti === bigIdx ? bigCap : cap; // 目标瓶容量按瓶取（大瓶 bigCap，零规则豁免）
+      const tcap = capAt(ti); // 目标瓶容量按瓶取（大瓶 bigCap / 混合关 per-bottle，R2 零规则豁免）
       if (!f.length || t.length >= tcap) return 0;
       if (ti === bigIdx && f[f.length - 1] !== bigColor) return 0; // 瓶口颜色限制（与 canPour 一致）
       if (t.length && t[t.length - 1] !== f[f.length - 1]) return 0;
@@ -330,7 +485,8 @@ export default class GameLogic {
         if (i === bigIdx) fixedKeys.push('B' + s); // 大瓶容量独特，按固定身份参与（R4）
         else if (done.has(i)) fixedKeys.push('D');
         else if (locked(i)) fixedKeys.push('L' + s);
-        else freeKeys.push(s);
+        // 混合关：容量编入自由瓶 key——内容相同但容量不同的瓶（cap3 vs cap5）不可互换去重
+        else freeKeys.push((mixCaps ? mixCaps[i] + ':' : '') + s);
       }
       const key = freeKeys.sort().join('|') + '#' + fixedKeys.join('|') + (keyLocks.length ? (keyOut ? '#K1' : '#K0') : '');
       if (visited.has(key)) return false;
@@ -352,8 +508,8 @@ export default class GameLogic {
           } else if (t.length) {
             let tr = 1;
             for (let i = t.length - 2; i >= 0 && t[i] === t[t.length - 1]; i--) tr++;
-            // 倒满即完成（目标整瓶同色）→ 腾出空瓶，最高优先
-            score = tr === t.length && t.length + amount === cap ? 600 : 100 + tr;
+            // 倒满即完成（目标整瓶同色）→ 腾出空瓶，最高优先（按该瓶容量判定，混合关 per-bottle）
+            score = tr === t.length && t.length + amount === capAt(to) ? 600 : 100 + tr;
           } else {
             score = 10; // 空瓶目标靠后（空瓶是最稀缺的中转资源）
           }
@@ -379,8 +535,8 @@ export default class GameLogic {
             }
           }
         }
-        if (bigIdx < 0 && t.length === cap) {
-          // 完成判定按真实色（与游戏 _isFullMono 一致；shuffle 验证时冻结瓶可能含隐藏层）。
+        if (bigIdx < 0 && t.length === capAt(m.to)) {
+          // 完成判定按真实色与该瓶容量（与游戏 _isFullMono 一致；shuffle 验证时冻结瓶可能含隐藏层）。
           // 特殊关无「完成清空」语义（R4：普通瓶满纯色不收走），整体跳过。
           const c0 = t[0] >= 0 ? t[0] : -t[0] - 1;
           if (t.every((c) => (c >= 0 ? c : -c - 1) === c0)) {
@@ -422,8 +578,9 @@ export default class GameLogic {
     return Math.min(this._topRunOf(f), capTo - t.length);
   }
 
-  /** 瓶 idx 的容量（特殊关大瓶 = bigCapacity，其余 = this.capacity） */
+  /** 瓶 idx 的容量（混合关 = caps[idx]；特殊关大瓶 = bigCapacity；其余 = this.capacity） */
   capOf(idx) {
+    if (this.mix) return this.caps[idx] || this.capacity;
     return this.special === 'bigBottle' && idx === this.bigIndex ? this.bigCapacity : this.capacity;
   }
 
@@ -489,7 +646,7 @@ export default class GameLogic {
     this._revealTop(f); // 倒出后源瓶若露出「?」层则揭示
 
     let completedColor = -1;
-    if (this.special !== 'bigBottle' && this._isFullMono(t)) {
+    if (this.special !== 'bigBottle' && this._isFullMono(t, this.capOf(to))) {
       completedColor = color;
       this.completed.push(color);
       t.length = 0;
@@ -520,6 +677,7 @@ export default class GameLogic {
     } else if (r.type === 'addBottle') {
       // LIFO 保证此时新增瓶必为空（其后所有倒水已先被撤销）
       this.bottles.splice(r.idx, 1);
+      if (this.mix) this.caps.splice(r.idx, 1); // 混合关：caps 与 bottles 平行同步
       this.removed.delete(r.idx);
     } else {
       this.bottles[r.from] = r.fromContent;
@@ -558,12 +716,17 @@ export default class GameLogic {
     }
     const total = layers.length;
     if (total === 0) return false;
-    // 可用瓶须能容纳全部待重排液体（每瓶至多 capacity；冻结瓶层数使 total 可能非 capacity 整除）
+    // 可用瓶须能容纳全部待重排液体（混合关 = 各瓶容量之和；其余关 = 瓶数 × capacity；
+    // 冻结瓶层数使 total 可能非整除）
     let activeCount = 0;
+    let activeCaps = 0;
     for (let i = 0; i < this.bottles.length; i++) {
-      if (!this.removed.has(i) && !frozen.has(i)) activeCount++;
+      if (!this.removed.has(i) && !frozen.has(i)) {
+        activeCount++;
+        activeCaps += this.capOf(i);
+      }
     }
-    if (Math.ceil(total / this.capacity) > activeCount) return false;
+    if (total > (this.mix ? activeCaps : activeCount * this.capacity)) return false;
 
     const snapshot = {
       type: 'shuffle',
@@ -595,19 +758,20 @@ export default class GameLogic {
           continue;
         }
         if (k < total) {
-          const take = Math.min(this.capacity, total - k);
-          bottles.push(layers.slice(k, k + take)); // 依次装满，最后一瓶装余量
+          const take = Math.min(this.capOf(i), total - k);
+          bottles.push(layers.slice(k, k + take)); // 依次装满（混合关按各瓶容量），最后一瓶装余量
           k += take;
         } else {
           bottles.push([]);
         }
       }
-      if (bottles.some((b, i) => i !== this.bigIndex && this._isFullMono(b))) continue;
+      if (bottles.some((b, i) => i !== this.bigIndex && this._isFullMono(b, this.capOf(i)))) continue;
       const bigInfo =
         this.special === 'bigBottle'
           ? { idx: this.bigIndex, capacity: this.bigCapacity, color: this.bigColor }
           : null;
-      if (!this._solvable(bottles, nodeLimit, this.removed, lockInfo, bigInfo)) continue;
+      if (!this._solvable(bottles, nodeLimit, this.removed, lockInfo, bigInfo, this.mix ? this.caps : null))
+        continue;
       this.bottles = bottles;
       // 解锁全部钥匙锁瓶（Q7=A）
       for (let k2 = 0; k2 < this.locks.length; k2++) {
@@ -657,6 +821,7 @@ export default class GameLogic {
   addBottle() {
     if (this.bottles.length >= 12) return false;
     this.bottles.push([]);
+    if (this.mix) this.caps.push(this.capacity); // 新瓶 = 标准容量中转位（PRD-混合容量瓶 §4.1）
     this.undoStack.push({ type: 'addBottle', idx: this.bottles.length - 1 });
     return true;
   }
@@ -668,11 +833,12 @@ export default class GameLogic {
    * 隐藏层仅在成为顶层时揭示，倒水规则无需特判。
    * excludeKey（可选，Q5=A）：钥匙层位置 {bottle, depth}，不与隐藏层共存（保证钥匙可见）。
    */
-  _markHidden(count, seed, excludeKey = null) {
+  /** 在给定瓶组上随机标记隐藏层（作用于传入数组，不依赖 this.bottles） */
+  _markHidden(bottles, count, seed, excludeKey = null) {
     const rng = new Rng(seed);
     const candidates = [];
-    for (let bi = 0; bi < this.bottles.length; bi++) {
-      for (let li = 0; li < this.bottles[bi].length - 1; li++) {
+    for (let bi = 0; bi < bottles.length; bi++) {
+      for (let li = 0; li < bottles[bi].length - 1; li++) {
         if (excludeKey && bi === excludeKey.bottle && li === excludeKey.depth) continue;
         candidates.push([bi, li]);
       }
@@ -681,7 +847,7 @@ export default class GameLogic {
       const j = i + rng.int(candidates.length - i);
       [candidates[i], candidates[j]] = [candidates[j], candidates[i]];
       const [bi, li] = candidates[i];
-      this.bottles[bi][li] = -(this.bottles[bi][li] + 1);
+      bottles[bi][li] = -(bottles[bi][li] + 1);
     }
   }
 
@@ -700,20 +866,26 @@ export default class GameLogic {
 
   /** 满瓶纯色判定：按真实色比较（隐藏层取负编码，真实色 = -(值+1)）。
    *  带隐藏层的满纯色瓶同样判定完成——与求解器（按真实色验证）语义对齐，
-   *  否则隐藏层恰好同色时真实游戏永不完成、求解器却判定有解。 */
-  _isFullMono(b) {
-    if (b.length !== this.capacity) return false;
+   *  否则隐藏层恰好同色时真实游戏永不完成、求解器却判定有解。
+   *  cap（可选）= 该瓶容量（混合关 per-bottle，缺省 this.capacity）。 */
+  _isFullMono(b, cap = this.capacity) {
+    if (b.length !== cap) return false;
     const c0 = b[0] >= 0 ? b[0] : -b[0] - 1;
     return b.every((c) => (c >= 0 ? c : -c - 1) === c0);
   }
 
-  /** 通关：普通关 = 所有颜色完成分装；特殊关 = 大瓶装满且纯色（R3，装满即集齐） */
+  /** 通关：普通/混合关 = 所有颜色完成分装 且 场上无剩余层（防拆色假通关，PRD-混合容量瓶 §2；
+   *  普通关语义等价——completed=colorCount 时场上必然已清空，零回归）；
+   *  特殊关 = 大瓶装满且纯色（R3，装满即集齐） */
   isWin() {
     if (this.special === 'bigBottle') {
       const big = this.bottles[this.bigIndex];
       return big.length === this.bigCapacity && big.every((c) => c === big[0]);
     }
-    return this.completed.length >= this.colorCount;
+    return (
+      this.completed.length >= this.colorCount &&
+      this.bottles.every((b, i) => this.removed.has(i) || b.length === 0)
+    );
   }
 
   /** 死局检测：场上不存在任何合法倒法 */

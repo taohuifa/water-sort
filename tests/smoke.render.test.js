@@ -722,8 +722,49 @@ check('设置页兑换码输入：unlock_all 解锁全部关卡、无效码提�
   main.scene = 'menu';
 });
 
-check('满瓶完成徽章链：满色瓶停留 ✓ 徽章 → 徽章结束后才起飞货架', () => {
-  // 进入 L1，DFS 求解路径（与 AC-11 同源），逐步经 tap 驱动真实 UI 动画链
+check('混合容量关渲染：L13 底对齐、瓶高 ∝ 容量、安全区、绘制不抛错、触摸命中按实际 rect（PRD-混合容量瓶 AC-7/8）', () => {
+  main.loadLevel(12); // L13 混合首秀
+  main.scene = 'game'; // loadLevel 不切场景（与既有用例同口径）
+  main.tick();
+  assert.ok(logic.mix, '应为混合关');
+  assert.strictEqual(logic.caps.length, logic.bottles.length, 'caps 与 bottles 平行');
+  assert.ok(logic.caps.some((c) => c !== logic.capacity), '容量应存在 3~5 混合');
+
+  const aspect = 3.0 * (1 + (logic.capacity - 4) * 0.11);
+  for (let i = 0; i < logic.bottles.length; i++) {
+    const r = renderer.bottleRects[i];
+    assert.ok(r && r.h > 0, `瓶 ${i} 应有布局`);
+    // 同宽 + 瓶高 ∝ 容量（统一层厚）
+    assert.ok(Math.abs(r.h / r.w - (aspect * logic.caps[i]) / logic.capacity) < 0.4, `瓶 ${i} 高宽比应 ∝ 容量`);
+    assert.strictEqual(logic.bottles[i].length <= logic.caps[i], true, `瓶 ${i} 层数不超容量`);
+  }
+  // 行内底对齐：同排瓶底 y 一致
+  const n = logic.bottles.length;
+  const cols = Math.max(2, Math.ceil(n / 2));
+  for (let r = 0; r * cols < n; r++) {
+    let bottom = null;
+    for (let c = 0; c < cols && r * cols + c < n; c++) {
+      const rect = renderer.bottleRects[r * cols + c];
+      const b = rect.y + rect.h;
+      if (bottom === null) bottom = b;
+      else assert.strictEqual(b, bottom, `第 ${r} 排应底对齐`);
+    }
+  }
+  assertBottlesInSafeArea();
+  main.tick(); // 绘制主路径不抛错
+
+  // 触摸命中按实际 rect：点第一个非空瓶选中
+  let target = -1;
+  for (let i = 0; i < n; i++) {
+    if (logic.bottles[i].length > 0) { target = i; break; }
+  }
+  const p = center(renderer.bottleRect(target));
+  tap(p.x, p.y);
+  assert.strictEqual(main.selected, target, '混合关触摸应按实际 rect 命中');
+  main.selected = -1;
+});
+
+check('满瓶完成徽章链：满色瓶停留 ✓ 徽章 → 徽章结束后才起飞货架', () => {  // 进入 L1，DFS 求解路径（与 AC-11 同源），逐步经 tap 驱动真实 UI 动画链
   main.cleared = 1;
   main.selectLevel(0);
   main.tick();

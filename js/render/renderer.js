@@ -17,6 +17,7 @@ export default class Renderer {
     this.capacity = 4; // 本关瓶容量（setupBoard 注入，决定层高与瓶高比例）
     this.bigIdx = -1; // 大瓶下标（特殊关，setupBoard 注入；普通关 -1）
     this.bigCapacity = 0; // 大瓶容量（特殊关）
+    this.caps = null; // 每瓶容量（混合关，setupBoard 注入；null = 均一容量）
     this.levelScroll = 0; // 关卡选择页竖向滚动偏移
     this.levelScrollMax = 0; // 滚动上限（drawLevelSelect 按内容高度计算）
     this.initSafeArea();
@@ -178,10 +179,11 @@ export default class Renderer {
    * 宽度为普通瓶 1.8 倍，高度按 bigCapacity 走同一 ±11%/层 伸缩公式；
    * 尺寸由「行宽不越界」与「2·bh + 2·gapY + bigH ≤ 安全区高」联立约束解出。
    */
-  setupBoard(bottleCount, capacity = 4, bigIdx = -1, bigCapacity = 0) {
+  setupBoard(bottleCount, capacity = 4, bigIdx = -1, bigCapacity = 0, caps = null) {
     this.capacity = capacity;
     this.bigIdx = bigIdx;
     this.bigCapacity = bigIdx >= 0 ? bigCapacity : 0;
+    this.caps = caps; // 每瓶容量（混合关；null = 均一容量）
     const n = bottleCount;
     const margin = 18;
     const gapX = 12;
@@ -232,6 +234,42 @@ export default class Renderer {
       return;
     }
 
+    // 混合容量关（PRD-混合容量瓶 §4.3）：统一层厚、同宽、行内底对齐（试管架）。
+    // 瓶高 = 容量 × 统一层厚；行高 = 行内最大容量 × 层厚；高度超预算时按比例缩瓶宽
+    // （瓶形 1:aspect 不变，与普通关压缩口径一致）。
+    if (caps && caps.length === bottleCount) {
+      const cols = Math.max(2, Math.ceil(n / 2));
+      const rows = Math.ceil(n / cols);
+      const aspect = 3.0 * (1 + (capacity - 4) * 0.11);
+      let bw = Math.min(48, (availW - (cols - 1) * gapX) / cols);
+      const rowMax = [];
+      for (let r = 0; r < rows; r++) {
+        let m = 1;
+        for (let c = 0; c < cols && r * cols + c < n; c++) m = Math.max(m, caps[r * cols + c]);
+        rowMax.push(m);
+      }
+      const sumRowMax = rowMax.reduce((s, m) => s + m, 0);
+      const bwNeed = ((availH - (rows - 1) * gapY) * capacity) / (aspect * sumRowMax);
+      bw = Math.max(16, Math.min(bw, bwNeed));
+      const unitH = (bw * aspect) / capacity; // 统一层厚（与普通关同瓶形口径）
+      const rowHs = rowMax.map((m) => m * unitH);
+      const gridH = rowHs.reduce((s, h) => s + h, 0) + (rows - 1) * gapY;
+      const gridW = cols * bw + (cols - 1) * gapX;
+      const startX = (this.W - gridW) / 2;
+      const startY = playTop + (availH - gridH) / 2;
+      let yBase = startY;
+      for (let r = 0; r < rows; r++) {
+        const rowBottom = yBase + rowHs[r]; // 行基线（行底），行内底对齐
+        for (let c = 0; c < cols && r * cols + c < n; c++) {
+          const i = r * cols + c;
+          const hi = unitH * caps[i];
+          this.bottleRects[i] = { x: startX + c * (bw + gapX), y: rowBottom - hi, w: bw, h: hi };
+        }
+        yBase = rowBottom + gapY;
+      }
+      return;
+    }
+
     const cols = Math.max(2, Math.ceil(n / 2));
     const rows = Math.ceil(n / cols);
 
@@ -260,9 +298,11 @@ export default class Renderer {
     }
   }
 
-  /** 瓶 i 的绘制容量（大瓶 = bigCapacity，其余 = this.capacity；S-07 层高自适应） */
+  /** 瓶 i 的绘制容量（混合关 = caps[i]；大瓶 = bigCapacity；其余 = this.capacity；S-07 层高自适应） */
   bottleCap(i) {
-    return i === this.bigIdx && this.bigCapacity > 0 ? this.bigCapacity : this.capacity;
+    if (i === this.bigIdx && this.bigCapacity > 0) return this.bigCapacity;
+    if (this.caps && this.caps[i]) return this.caps[i];
+    return this.capacity;
   }
 
   bottleRect(idx) {

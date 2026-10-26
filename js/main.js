@@ -115,7 +115,8 @@ export default class Main {
       this.logic.bottles.length,
       this.logic.capacity,
       this.logic.bigIndex,
-      this.logic.bigCapacity
+      this.logic.bigCapacity,
+      this.logic.mix ? this.logic.caps : null
     );
   }
 

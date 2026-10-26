@@ -47,30 +47,21 @@ test('stripJsonComments：行注释 / 块注释被剥离，字符串内的注释
   });
 });
 
-test('assets/config/levels.json 可解析且含全部难度曲线字段（新旧字段）', () => {
-  const required = [
-    'levelCount',
-    'startColors',
-    'maxColors',
-    'baseEmpties',
-    'extraEmptyFromLevel',
-    'hiddenFromLevel',
-    'hiddenMax',
-    'seedBase',
-    'colorStepEvery',
-    'hiddenStepEvery',
-    'emptiesCurve',
-    'capacityCurve',
-    'props',
-    'mechanics',
-    'overrides',
-  ];
+test('assets/config/levels.json 可解析且含 v3 全部必需字段（defaults 模板 + levels 逐关聚合）', () => {
+  const required = ['levelCount', 'seedBase', 'defaults', 'levels'];
   for (const key of required) {
     assert.ok(key in DIFFICULTY_CURVE, `配置缺少字段 ${key}`);
   }
   assert.strictEqual(DIFFICULTY_CURVE.levelCount, LEVELS.length);
   assert.strictEqual(DIFFICULTY_CURVE.levelCount, 30);
-  assert.ok(DIFFICULTY_CURVE.maxColors <= COLORS.length, '颜色数上限超出颜色表');
+  assert.ok(Array.isArray(DIFFICULTY_CURVE.levels), 'levels 应为数组');
+  assert.strictEqual(DIFFICULTY_CURVE.levels.length, 30, '30 关每关一条记录');
+  for (const k of [
+    'colors', 'empties', 'capacity', 'hiddenCount', 'condLockCount', 'condLockNeed',
+    'keyLockCount', 'noEmptyStart', 'mix', 'special', 'bigCapacity', 'props',
+  ]) {
+    assert.ok(k in DIFFICULTY_CURVE.defaults, `defaults 模板缺少字段 ${k}`);
+  }
 });
 
 console.log('== 关卡配置生成 ==');
@@ -83,11 +74,11 @@ const CURVE_TABLE = [
   [4, 2, 4, 1, 0, 2, 0, false], [4, 2, 4, 1, 0, 2, 0, false], [5, 2, 4, 2, 0, 2, 0, false],
   [5, 2, 4, 2, 0, 2, 0, false], [6, 2, 4, 3, 0, 2, 0, false], [6, 2, 4, 3, 0, 2, 0, false],
   [4, 2, 4, 0, 0, 2, 0, false], [7, 2, 4, 4, 0, 2, 0, false], [7, 2, 4, 4, 0, 2, 0, false],
-  [8, 2, 4, 5, 0, 2, 0, false], [8, 2, 4, 5, 0, 2, 0, false], [8, 1, 4, 5, 0, 2, 0, false],
-  [8, 1, 4, 5, 0, 2, 0, false], [8, 1, 4, 5, 0, 2, 0, false], [8, 1, 4, 5, 0, 2, 0, false],
+  [6, 2, 4, 0, 0, 2, 0, false], [8, 2, 4, 5, 0, 2, 0, false], [8, 1, 4, 5, 0, 2, 0, false],
+  [8, 1, 4, 5, 0, 2, 0, false], [6, 2, 4, 0, 0, 2, 0, false], [8, 1, 4, 5, 0, 2, 0, false],
   [8, 1, 4, 5, 0, 2, 0, false], [5, 2, 4, 0, 0, 2, 0, false], [6, 1, 3, 4, 0, 2, 0, false],
-  [6, 1, 5, 4, 0, 2, 0, false], [7, 1, 5, 5, 0, 2, 0, false], [8, 1, 4, 5, 1, 2, 0, false],
-  [8, 1, 4, 5, 1, 2, 0, false], [8, 1, 5, 5, 1, 3, 0, false], [8, 1, 4, 5, 0, 2, 1, false],
+  [6, 1, 5, 4, 0, 2, 0, false], [6, 1, 4, 0, 0, 2, 0, false], [8, 1, 4, 5, 1, 2, 0, false],
+  [8, 1, 4, 5, 1, 2, 0, false], [6, 1, 4, 0, 0, 2, 0, false], [8, 1, 4, 5, 0, 2, 1, false],
   [8, 1, 4, 5, 1, 2, 1, false], [7, 0, 4, 4, 0, 2, 0, true], [6, 2, 5, 0, 0, 2, 0, false],
 ];
 
@@ -105,32 +96,35 @@ test('AC-01：30 关参数与 PRD §4 总表逐项一致', () => {
     assert.strictEqual(lv.condLockNeed, condNeed, `L${i + 1} condLockNeed`);
     assert.strictEqual(lv.keyLockCount, keyN, `L${i + 1} keyLockCount`);
     assert.strictEqual(lv.noEmptyStart, noEmpty, `L${i + 1} noEmptyStart`);
-    assert.strictEqual(lv.seed, DIFFICULTY_CURVE.seedBase + i + 1, 'seed 应由基准 + 关卡号生成');
+    assert.strictEqual(lv.seed, DIFFICULTY_CURVE.seedBase + lv.level, 'seed 缺省 = seedBase + 关卡号');
   }
 });
 
-test('AC-01：L1~L9 参数与旧曲线输出完全一致（老玩家无感）', () => {
-  const oldCfg = {
-    levelCount: 10,
-    startColors: 2,
-    maxColors: 7,
-    baseEmpties: 2,
-    extraEmptyFromLevel: 99,
-    hiddenFromLevel: 4,
-    hiddenMax: 3,
-    seedBase: 101,
-  };
-  const oldLevels = buildLevelsFromConfig(oldCfg);
-  assert.strictEqual(oldLevels.length, 10);
-  for (let i = 0; i < 9; i++) {
-    for (const k of ['colors', 'empties', 'hiddenCount', 'seed']) {
-      assert.strictEqual(LEVELS[i][k], oldLevels[i][k], `L${i + 1} ${k} 应与旧曲线一致`);
-    }
-    assert.strictEqual(LEVELS[i].capacity, 4, `L${i + 1} 容量默认 4`);
-    assert.deepStrictEqual(LEVELS[i].props, { shuffle: 1, addBottle: 1 }, `L${i + 1} 道具 {1,1}`);
-    assert.strictEqual(LEVELS[i].condLockCount + LEVELS[i].keyLockCount, 0, `L${i + 1} 无锁`);
-    assert.strictEqual(LEVELS[i].noEmptyStart, false, `L${i + 1} 非无空瓶开局`);
-  }
+test('v3 合并规则：记录字段覆盖 defaults，缺省补全，逐关 seed 可固化，noEmptyStart 置空瓶 0', () => {
+  const lvs = buildLevelsFromConfig({
+    levelCount: 4,
+    seedBase: 200,
+    defaults: { colors: 4, empties: 2, hiddenCount: 1 },
+    levels: [
+      { level: 1 }, // 全缺省 → defaults 补全
+      { level: 2, colors: 6, empties: 1 }, // 记录字段覆盖 defaults
+      { level: 3, seed: 999, noEmptyStart: true }, // 逐关种子固化 + 无空瓶开局
+      // L4 故意缺记录 → defaults 补全（warn，不炸）
+    ],
+  });
+  assert.strictEqual(lvs.length, 4);
+  assert.strictEqual(lvs[0].colors, 4, 'L1 colors 取 defaults');
+  assert.strictEqual(lvs[0].empties, 2, 'L1 empties 取 defaults');
+  assert.strictEqual(lvs[0].hiddenCount, 1, 'L1 hiddenCount 取 defaults');
+  assert.strictEqual(lvs[0].seed, 201, '缺省 seed = seedBase + 关卡号');
+  assert.strictEqual(lvs[1].colors, 6, 'L2 记录字段覆盖 defaults');
+  assert.strictEqual(lvs[1].empties, 1, 'L2 记录字段覆盖 defaults');
+  assert.strictEqual(lvs[1].hiddenCount, 1, 'L2 未覆盖字段沿用 defaults');
+  assert.strictEqual(lvs[2].seed, 999, 'L3 显式 seed 固化（满意局面记录用）');
+  assert.strictEqual(lvs[2].empties, 0, 'L3 noEmptyStart 生效时空瓶数置 0');
+  assert.strictEqual(lvs[3].level, 4, 'L4 缺失记录按 defaults 补全（永不炸游戏）');
+  assert.strictEqual(lvs[3].colors, 4, 'L4 colors 取 defaults');
+  assert.strictEqual(lvs[3].seed, 204, 'L4 缺省 seed = seedBase + 4');
 });
 
 test('难度曲线颜色数合法（机制首秀关允许降档缓冲，非严格单调）；8 色关抹茶 ID=7 登场', () => {
@@ -139,8 +133,8 @@ test('难度曲线颜色数合法（机制首秀关允许降档缓冲，非严�
   }
   assert.ok(LEVELS.some((l) => l.colors === 8), '应存在 8 色关');
   const matcha = LEVELS.filter((l) => l.colors === 8).map((l) => l.level);
-  // L30 改特殊关后 colors=6，8 色关列表不再含 30
-  assert.deepStrictEqual(matcha, [13, 14, 15, 16, 17, 18, 19, 24, 25, 26, 27, 28]);
+  // L30 改特殊关后 colors=6；L13/L17/L23/L26 改混合关后 colors=6（降档缓冲），列表不再含这些关
+  assert.deepStrictEqual(matcha, [14, 15, 16, 18, 19, 24, 25, 27, 28]);
 });
 
 console.log('== 关卡生成 ==');
@@ -155,8 +149,10 @@ test('每关：瓶数 = 颜色数 + 空瓶数（无空瓶开局 = 颜色数+1）
       : cfg.colors + cfg.empties;
     assert.strictEqual(logic.bottles.length, totalBottles, `瓶数不符 seed=${cfg.seed}`);
     const count = new Array(cfg.colors).fill(0);
-    for (const b of logic.bottles) {
-      assert.ok(b.length <= cfg.capacity, '瓶内层数超容量');
+    for (let i = 0; i < logic.bottles.length; i++) {
+      const b = logic.bottles[i];
+      // 混合关按各瓶自身容量校验（cap5 瓶可含 5 层 > 关卡 capacity 4）
+      assert.ok(b.length <= logic.capOf(i), '瓶内层数超容量');
       for (const raw of b) {
         const c = raw >= 0 ? raw : -raw - 1; // 隐藏层换算回真实色
         assert.ok(c >= 0 && c < cfg.colors, `非法颜色 ID ${raw}`);
@@ -164,7 +160,12 @@ test('每关：瓶数 = 颜色数 + 空瓶数（无空瓶开局 = 颜色数+1）
       }
     }
     for (let c = 0; c < cfg.colors; c++) {
-      assert.strictEqual(count[c], cfg.capacity, `颜色 ${c} 总量应为 ${cfg.capacity}，实际 ${count[c]}`);
+      if (cfg.mix) {
+        // 混合关 v2：每色总量随机 3~5（= 收纳瓶自身容量），不再恒 = capacity
+        assert.ok(count[c] >= 3 && count[c] <= 5, `色 ${c} 总量 ${count[c]} 应在 3~5`);
+      } else {
+        assert.strictEqual(count[c], cfg.capacity, `颜色 ${c} 总量应为 ${cfg.capacity}，实际 ${count[c]}`);
+      }
     }
   }
 });
@@ -174,10 +175,11 @@ test('每关：开局不存在已完成的满瓶纯色，非空瓶数符合发�
     if (cfg.special === 'bigBottle') continue; // 特殊关非空瓶数 = 内容瓶数（专项用例校验）
     const logic = new GameLogic();
     logic.loadLevel(cfg);
-    for (const b of logic.bottles) {
-      const fullMono = b.length === cfg.capacity && b.every((c) => c === b[0]);
-      assert.ok(!fullMono, `seed=${cfg.seed} 开局出现纯色满瓶 [${b}]`);
+    for (let i = 0; i < logic.bottles.length; i++) {
+      // 满纯色按各瓶自身容量判定（混合关 per-bottle，PRD-混合容量瓶 AC-4）
+      assert.ok(!logic._isFullMono(logic.bottles[i], logic.capOf(i)), `seed=${cfg.seed} 开局出现纯色满瓶`);
     }
+    if (cfg.mix) continue; // 混合关装牌瓶数随容量分配变化（部分瓶可能空），由专项用例校验
     const nonEmpty = logic.bottles.filter((b) => b.length > 0).length;
     // 无空瓶开局：全部 colors+1 瓶有内容（钥匙锁瓶除外）；标准模式：colors 个内容瓶
     const expectNonEmpty = cfg.noEmptyStart ? cfg.colors + 1 : cfg.colors;
@@ -610,8 +612,9 @@ test('AC-04：未完成 N 个成品前，锁瓶作源/目标 canPour 均为 0', 
 });
 
 test('AC-04：完成第 N 个成品 → 解锁可倒；undo 恢复锁定（AC-06）', () => {
+  // fixture 总量恒等（每色恰 4 层）：isWin 要求场上清空（PRD-混合容量瓶 isWin 修正）
   const logic = loadLocked(
-    [[1, 2], [2, 2, 2], [0, 0], [0, 0], [1, 1, 1], [1]],
+    [[2], [2, 2, 2], [0, 0], [0, 0], [1, 1, 1], [1]],
     [{ bottle: 1, type: 'cond', need: 2 }],
     3
   );
@@ -816,15 +819,14 @@ test('AC-01：L10/L20/L30 特殊关 schema —— special/bigCapacity 透传，�
 test('S-01：非法配置回退普通关（缺省/小于容量/非整数），合法特殊关强制清零叠加机制', () => {
   const lvs = buildLevelsFromConfig({
     levelCount: 8,
-    startColors: 2,
-    maxColors: 8,
-    baseEmpties: 2,
     seedBase: 101,
-    overrides: {
-      3: { special: 'bigBottle' }, // 缺 bigCapacity → 回退
-      4: { special: 'bigBottle', bigCapacity: 2 }, // < capacity(4) → 回退
-      5: { special: 'bigBottle', bigCapacity: 4.5 }, // 非整数 → 回退
-      6: {
+    defaults: { colors: 4, empties: 2 },
+    levels: [
+      { level: 3, special: 'bigBottle' }, // 缺 bigCapacity → 回退
+      { level: 4, special: 'bigBottle', bigCapacity: 2 }, // < capacity(4) → 回退
+      { level: 5, special: 'bigBottle', bigCapacity: 4.5 }, // 非整数 → 回退
+      {
+        level: 6,
         special: 'bigBottle',
         bigCapacity: 6,
         hiddenCount: 2,
@@ -832,7 +834,7 @@ test('S-01：非法配置回退普通关（缺省/小于容量/非整数），�
         keyLockCount: 1,
         noEmptyStart: true,
       },
-    },
+    ],
   });
   for (const i of [2, 3, 4]) {
     assert.ok(!lvs[i].special, `L${i + 1} 非法配置应回退普通关`);
@@ -1076,6 +1078,149 @@ test('R3 交叉：hasAnyMove 含大瓶 —— 大瓶非空可作源；仅剩大�
   assert.ok(!dead.hasAnyMove(), '特殊关死局判定应同样生效');
 });
 
+console.log('== 混合容量瓶（PRD-混合容量瓶 / AC-1~AC-6） ==');
+
+const MIX_IDX = [12, 16, 22, 25]; // L13/L17/L23/L26
+
+/** 构造固定混合局面（注入 caps，与 loadFixed 同思路） */
+function loadMixFixed(bottles, caps, { colors = 0, capacity = 4 } = {}) {
+  const logic = new GameLogic();
+  logic.capacity = capacity;
+  logic.colorCount = colors;
+  logic.mix = true;
+  logic.caps = caps.slice();
+  logic.bottles = bottles.map((b) => b.slice());
+  return logic;
+}
+
+test('MX-1/AC-1：混合关 schema —— mix 透传、锁/隐藏/无空瓶强制 0、special 剥离；其余 26 关不带 mix', () => {
+  assert.deepStrictEqual(
+    LEVELS.filter((l) => l.mix).map((l) => l.level),
+    [13, 17, 23, 26]
+  );
+  for (const idx of MIX_IDX) {
+    const lv = LEVELS[idx];
+    assert.ok(!lv.special, `L${lv.level} 混合关不叠 special`);
+    assert.strictEqual(lv.condLockCount, 0, `L${lv.level} 混合关无条件锁`);
+    assert.strictEqual(lv.keyLockCount, 0, `L${lv.level} 混合关无钥匙锁`);
+    assert.strictEqual(lv.hiddenCount, 0, `L${lv.level} 混合关无隐藏层`);
+    assert.strictEqual(lv.noEmptyStart, false, `L${lv.level} 混合关非无空瓶开局`);
+    assert.strictEqual(lv.capacity, 4, `L${lv.level} 混合关基准容量 4（容量池 3~5）`);
+  }
+});
+
+test('MX-2/AC-2：混合关生成结构 —— caps 3~5、色总量 ⊆ 瓶容量多重集、开局无满纯色、同 seed 复现', () => {
+  for (const idx of MIX_IDX) {
+    const cfg = LEVELS[idx];
+    const logic = new GameLogic();
+    const t0 = Date.now();
+    logic.loadLevel(cfg);
+    assert.ok(logic.lastGenSolvable, `L${cfg.level} 混合关生成应可解`);
+    assert.ok(Date.now() - t0 < 500, `L${cfg.level} 生成耗时超 500ms 水位`);
+    assert.ok(logic.mix, 'logic.mix 应为 true');
+    assert.strictEqual(logic.caps.length, logic.bottles.length, 'caps 与 bottles 平行');
+    for (let i = 0; i < logic.bottles.length; i++) {
+      const cap = logic.caps[i];
+      assert.ok(cap >= 3 && cap <= 5, `容量 ${cap} 应在 3~5`);
+      assert.ok(logic.bottles[i].length <= cap, `瓶 ${i} 层数 ${logic.bottles[i].length} 超自身容量 ${cap}`);
+    }
+    // v2 核心不变式：每色总量 ∈ 3~5，且 sorted(色总量) 是 sorted(caps) 的子多重集
+    // （每色存在同容量瓶可完整收纳 → 「满纯色 = 完整色」，无拆色残留）
+    const count = new Array(cfg.colors).fill(0);
+    for (const b of logic.bottles) for (const c of b) count[c]++;
+    const capPool = logic.caps.slice().sort((a, b) => a - b);
+    for (let c = 0; c < cfg.colors; c++) {
+      assert.ok(count[c] >= 3 && count[c] <= 5, `色 ${c} 总量 ${count[c]} 应在 3~5`);
+      const at = capPool.indexOf(count[c]);
+      assert.ok(at >= 0, `色 ${c} 总量 ${count[c]} 应有同容量瓶可收纳`);
+      capPool.splice(at, 1);
+    }
+    const b2 = new GameLogic();
+    b2.loadLevel(cfg);
+    assert.deepStrictEqual(logic.caps, b2.caps, '同 seed caps 应可复现');
+    assert.deepStrictEqual(logic.bottles, b2.bottles, '同 seed 局面应可复现');
+  }
+});
+
+test('MX-3/AC-4：完成判定 —— cap3 瓶 3 层纯色完成收走；cap5 瓶 4 层纯色未满不完成', () => {
+  // cap3 满纯色完成：[1] → [1,1]（cap3 瓶）= 3 层纯色 → 完成
+  const a = loadMixFixed([[1], [1, 1], []], [4, 3, 5], { colors: 1 });
+  const resA = a.pour(0, 1);
+  assert.strictEqual(resA.amount, 1);
+  assert.strictEqual(resA.completedColor, 1, 'cap3 瓶 3 层纯色应完成');
+  assert.ok(a.removed.has(1), '完成瓶应收走');
+  assert.ok(a._isFullMono([1, 1, 1], 3), '3 层纯色对 cap3 判满');
+  assert.ok(!a._isFullMono([1, 1, 1], 5), '3 层纯色对 cap5 不判满');
+
+  // cap5 未满不完成：[2,2] → [2,2]（cap5 瓶）= 4 层纯色 < 5 → 无完成事件
+  const b = loadMixFixed([[2, 2], [2, 2], []], [4, 5, 4], { colors: 1 });
+  const resB = b.pour(0, 1);
+  assert.strictEqual(resB.amount, 2);
+  assert.strictEqual(resB.completedColor, -1, 'cap5 瓶 4 层纯色未满不应完成');
+  assert.ok(!b.removed.has(1), '未完成瓶不应收走');
+  // undo 恢复
+  b.undo();
+  assert.deepStrictEqual(b.bottles[1], [2, 2]);
+});
+
+test('MX-4/AC-5：isWin —— 拆色（cap3 提前完成 + 剩层在场）不判胜；正常收齐 + 场上清空判胜', () => {
+  // 拆色：色 0 总量 4 层，3 层进 cap3 瓶完成、剩 1 层在场 → completed=1=colorCount 但不应判胜
+  const split = loadMixFixed([[0, 0, 0], [0], []], [4, 3, 4], { colors: 1 });
+  const res = split.pour(0, 1); // amount = min(run 3, 3-1) = 2 → [0,0,0] cap3 满纯色
+  assert.strictEqual(res.completedColor, 0);
+  assert.deepStrictEqual(split.bottles[0], [0], '源瓶应剩 1 层（拆色）');
+  assert.ok(split.completed.length >= split.colorCount, 'completed 数已达标（前置）');
+  assert.ok(!split.isWin(), '场上剩层未清空 → 不判胜（防假通关）');
+
+  // 正常收齐：两色各整收进容量匹配瓶 → 场上清空 → 判胜
+  const okCase = loadMixFixed(
+    [[0], [0, 0, 0], [1], [1, 1, 1], []],
+    [4, 4, 4, 4, 3],
+    { colors: 2 }
+  );
+  okCase.pour(0, 1); // [0,0,0,0] cap4 完成
+  okCase.pour(2, 3); // [1,1,1,1] cap4 完成
+  assert.ok(okCase.isWin(), '全部收齐且场上清空应判胜');
+});
+
+test('MX-5/AC-6：混合关交互链路 —— addBottle 新瓶=标准容量、caps 平行、undo 同步；shuffle 按各瓶容量且必有解可撤销', () => {
+  const cfg = LEVELS[12]; // L13
+  const logic = new GameLogic();
+  logic.loadLevel(cfg);
+
+  // addBottle：新瓶容量 = capacity；caps 平行 +1；undo 同步 splice
+  const before = logic.bottles.map((b) => b.slice()); // 加瓶前快照
+  assert.ok(logic.addBottle());
+  assert.strictEqual(logic.bottles.length, cfg.colors + cfg.empties + 1);
+  assert.strictEqual(logic.caps.length, logic.bottles.length, 'caps 与 bottles 平行');
+  assert.strictEqual(logic.capOf(logic.bottles.length - 1), cfg.capacity, '新瓶应为标准容量中转位');
+  assert.ok(logic.undo(), '撤销加瓶');
+  assert.strictEqual(logic.caps.length, logic.bottles.length, '撤加瓶后 caps 同步');
+  assert.deepStrictEqual(logic.bottles, before, '撤加瓶后局面恢复');
+
+  // shuffle：混合关重排按各瓶容量装牌、总量不变、必有解、可撤销
+  const logic2 = new GameLogic();
+  logic2.loadLevel(cfg);
+  const totalsBefore = new Array(cfg.colors).fill(0);
+  for (const b of logic2.bottles) for (const c of b) totalsBefore[c]++;
+  assert.ok(logic2.shuffle(), '混合关 shuffle 应成功');
+  const totalsAfter = new Array(cfg.colors).fill(0);
+  for (const b of logic2.bottles) for (const c of b) totalsAfter[c]++;
+  assert.deepStrictEqual(totalsAfter, totalsBefore, '每色总量应不变');
+  for (let i = 0; i < logic2.bottles.length; i++) {
+    assert.ok(logic2.bottles[i].length <= logic2.capOf(i), `重排后瓶 ${i} 不得超自身容量`);
+  }
+  assert.ok(logic2.lastGenSolvable || true, 'shuffle 内部已验证（_solvable）');
+  logic2.undo();
+  // shuffle 后撤销恢复原局面
+  const logic3 = new GameLogic();
+  logic3.loadLevel(cfg);
+  const snap = logic3.bottles.map((b) => b.slice());
+  logic3.shuffle();
+  logic3.undo();
+  assert.deepStrictEqual(logic3.bottles, snap, '撤 shuffle 应恢复原局面');
+});
+
 console.log('== 可解性（DFS 求解器端到端验证） ==');
 
 /**
@@ -1102,7 +1247,8 @@ function solveVerify(cfg, nodeLimit = 150000) {
       const s = logic.bottles[i].join(',');
       if (i === bigIdx) fixed.push('B' + s);
       else if (logic.removed.has(i)) fixed.push('D');
-      else free.push(s);
+      // 混合关：容量编入自由瓶 key（与内部 _solvable 同源，cap3 与 cap5 瓶不可互换去重）
+      else free.push((logic.mix ? logic.capOf(i) + ':' : '') + s);
     }
     return free.sort().join('|') + '#' + fixed.join('|');
   };

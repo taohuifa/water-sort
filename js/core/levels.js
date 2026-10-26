@@ -62,70 +62,55 @@ export function parseJsonc(text) {
 }
 
 /**
- * 曲线段取值：返回 fromLevel ≤ level 的最大段的 value；无匹配段/无曲线时回退 fallback。
- */
-function segValue(segments, level, fallback) {
-  if (!Array.isArray(segments)) return fallback;
-  let v = fallback;
-  for (const seg of segments) {
-    if (level >= seg.fromLevel) v = seg.value;
-  }
-  return v;
-}
-
-/**
- * 按难度曲线配置生成关卡列表。
+ * 按关卡配置生成关卡列表（v3：defaults 默认模板 + levels 逐关记录，无曲线生成）。
  * 配置存放在 assets/config/levels.json（.json 扩展名，内容为 JSONC），
  * 由入口（js/main.js）或测试读取文件文本并 parseJsonc 后传入本函数，
  * 逻辑层不直接读文件。
  *
- * 生成优先级：overrides[关卡号] > 曲线段 > 旧字段默认值。
- * 新字段全部可选，缺失时逐项回退到旧行为（容量 4、道具全程 {1,1}、无锁）。
- *
- * 生成规则：
- * - 颜色数每 colorStepEvery（默认 2）关 +1，封顶 maxColors
- * - 空瓶数：emptiesCurve 分段阶梯；未配置时回退 baseEmpties + extraEmptyFromLevel 旧公式
- * - 容量：capacityCurve 分段（3~8）；未配置时恒为 CAPACITY
- * - 问号隐藏层：第 hiddenFromLevel 关起每 hiddenStepEvery（默认 2）关 +1，封顶 hiddenMax
- * - 道具：props.freeUntilLevel 之前出厂 {1,1}，之后 {0,0}（仅广告补给）
- * - 机制：mechanics.*.fromLevel 起启用（condLock/keyLock/noEmptyStart），noEmptyStart 时 empties=0
+ * 取值优先级：levels[n].<字段> > defaults.<字段> > 内置兜底。
+ * - 每关一条记录，缺失的记录按 defaults 补全（warn，永不炸游戏）
+ * - 逐关随机种子：levels[n].seed 缺省时 = seedBase + 关卡号（满意局面固化用，见配置头注释）
+ * - noEmptyStart 生效时空瓶数置 0
+ * - 特殊关（bigBottle）/ 混合关（mix）校验清零叠加机制（v1 不叠加）
  */
-export function buildLevelsFromConfig(curve) {
-  const colorStep = curve.colorStepEvery || 2;
-  const hiddenStep = curve.hiddenStepEvery || 2;
-  const freeUntil = curve.props ? curve.props.freeUntilLevel : undefined;
-  const mech = curve.mechanics || {};
-  const overrides = curve.overrides || {};
-  const fromLevel = (m) => (m && m.fromLevel != null ? m.fromLevel : Infinity);
+export function buildLevelsFromConfig(cfg) {
+  const levelCount = cfg.levelCount || 0;
+  const seedBase = typeof cfg.seedBase === 'number' ? cfg.seedBase : 0;
+  const defaults = cfg.defaults || {};
+  const records = Array.isArray(cfg.levels) ? cfg.levels : [];
+  const byNo = new Map();
+  for (const r of records) {
+    if (r && Number.isInteger(r.level)) {
+      if (byNo.has(r.level)) console.warn(`[levels] L${r.level} 记录重复，后者覆盖`);
+      byNo.set(r.level, r);
+    }
+  }
 
+  const num = (v, fb) => (typeof v === 'number' ? v : fb);
   const levels = [];
-  for (let i = 0; i < curve.levelCount; i++) {
-    const level = i + 1;
+  for (let i = 1; i <= levelCount; i++) {
+    if (!byNo.has(i)) console.warn(`[levels] L${i} 缺少记录，按 defaults 补全`);
+    const r = byNo.get(i) || {};
     const lv = {
-      level,
-      colors: Math.min(curve.maxColors, curve.startColors + Math.floor(level / colorStep)),
-      empties: Array.isArray(curve.emptiesCurve)
-        ? segValue(curve.emptiesCurve, level, curve.baseEmpties)
-        : curve.baseEmpties + (level >= curve.extraEmptyFromLevel ? 1 : 0),
-      hiddenCount:
-        level >= curve.hiddenFromLevel
-          ? Math.min(curve.hiddenMax, Math.floor((level - curve.hiddenFromLevel) / hiddenStep) + 1)
-          : 0,
-      seed: curve.seedBase + level,
-      capacity: segValue(curve.capacityCurve, level, CAPACITY),
-      props:
-        freeUntil === undefined || level <= freeUntil
-          ? { shuffle: 1, addBottle: 1 }
-          : { shuffle: 0, addBottle: 0 },
-      condLockCount: level >= fromLevel(mech.condLock) ? 1 : 0,
-      condLockNeed: (mech.condLock && mech.condLock.need) || 2,
-      keyLockCount: level >= fromLevel(mech.keyLock) ? 1 : 0,
-      noEmptyStart: level >= fromLevel(mech.noEmptyStart),
+      level: i,
+      colors: num(r.colors, num(defaults.colors, 4)),
+      empties: num(r.empties, num(defaults.empties, 2)),
+      capacity: num(r.capacity, num(defaults.capacity, CAPACITY)),
+      hiddenCount: num(r.hiddenCount, num(defaults.hiddenCount, 0)),
+      condLockCount: num(r.condLockCount, num(defaults.condLockCount, 0)),
+      condLockNeed: num(r.condLockNeed, num(defaults.condLockNeed, 2)),
+      keyLockCount: num(r.keyLockCount, num(defaults.keyLockCount, 0)),
+      noEmptyStart: r.noEmptyStart ?? defaults.noEmptyStart ?? false,
+      mix: r.mix ?? defaults.mix ?? false,
+      special: r.special ?? defaults.special ?? null,
+      bigCapacity: num(r.bigCapacity, num(defaults.bigCapacity, 0)),
+      props: { shuffle: 1, addBottle: 1, ...(defaults.props || {}), ...(r.props || {}) },
+      // 逐关随机种子（满意局面固化）：缺省 = seedBase + 关卡号
+      seed: typeof r.seed === 'number' ? r.seed : seedBase + i,
     };
-    if (lv.noEmptyStart) lv.empties = 0; // 无空瓶开局：空瓶数由机制置 0（非空瓶曲线段）
-    const ov = overrides[String(level)] || overrides[level];
-    if (ov) Object.assign(lv, ov);
-    _validateSpecial(lv, level);
+    if (lv.noEmptyStart) lv.empties = 0; // 无空瓶开局：空瓶数由机制置 0
+    _validateSpecial(lv, i);
+    _validateMix(lv, i);
     levels.push(lv);
   }
   return levels;
@@ -163,5 +148,39 @@ function _validateSpecial(lv, level) {
   if (lv.noEmptyStart) {
     console.warn(`[levels] L${level} 特殊关不叠加无空瓶开局（v1），noEmptyStart 强制 false`);
     lv.noEmptyStart = false;
+  }
+}
+
+/**
+ * 混合容量关校验（PRD-混合容量瓶 §3，v1 不叠加）：
+ * - mix 关强制 condLock/keyLock/hiddenCount 清零、noEmptyStart 强制 false（+ warn）；
+ * - 剥离 special（v1 mix 与大瓶互斥，配置层双保险）；
+ * - capacity 需为 ≥2 整数（容量池 = capacity±1 至少含 1），非法回退 4。
+ */
+function _validateMix(lv, level) {
+  if (!lv.mix) return;
+  if (lv.special === 'bigBottle') {
+    console.warn(`[levels] L${level} 混合关不叠加特殊关（v1），special 剥离`);
+    delete lv.special;
+    delete lv.bigCapacity;
+  }
+  const forceZero = [
+    ['condLockCount', '条件锁'],
+    ['keyLockCount', '钥匙锁'],
+    ['hiddenCount', '隐藏层'],
+  ];
+  for (const [k, label] of forceZero) {
+    if (lv[k]) {
+      console.warn(`[levels] L${level} 混合关不叠加${label}（v1），${k} 强制 0`);
+      lv[k] = 0;
+    }
+  }
+  if (lv.noEmptyStart) {
+    console.warn(`[levels] L${level} 混合关不叠加无空瓶开局（v1），noEmptyStart 强制 false`);
+    lv.noEmptyStart = false;
+  }
+  if (!(Number.isInteger(lv.capacity) && lv.capacity >= 2)) {
+    console.warn(`[levels] L${level} 混合关 capacity=${lv.capacity} 非法（需 ≥2 整数），回退 4`);
+    lv.capacity = 4;
   }
 }
