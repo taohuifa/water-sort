@@ -66,27 +66,28 @@ test('assets/config/levels.json 可解析且含 v3 全部必需字段（defaults
 
 console.log('== 关卡配置生成 ==');
 
-// PRD §4 难度曲线总表（AC-01）：[colors, empties, capacity, hidden, condLockCount, condLockNeed, keyLockCount, noEmptyStart]
-// L10/L20/L30 为特殊关（bigBottle，PRD-特殊关卡-大瓶收集.md §7 拍板 1=A/2=D 原位替换；
-// special 关 hidden/cond/key/noEmptyStart 强制清零，empties 统一 2）
+// 30 关难度总表（AC-01，2026-10-26 按实测难度重排，见 docs/解题报告-30关.md）：
+// [colors, empties, capacity, hidden, condLockCount, condLockNeed, keyLockCount, noEmptyStart, seed(null=缺省 seedBase+关卡号)]
+// 特殊关 L10/L20/L30 固定里程碑位（bigBottle，special 关 hidden/cond/key/noEmptyStart 强制清零，empties 统一 2）；
+// 移动过的记录带冻结 seed（= 101 + 原关号）保持牌面不变。
 const CURVE_TABLE = [
-  [2, 2, 4, 0, 0, 2, 0, false], [3, 2, 4, 0, 0, 2, 0, false], [3, 2, 4, 0, 0, 2, 0, false],
-  [4, 2, 4, 1, 0, 2, 0, false], [4, 2, 4, 1, 0, 2, 0, false], [5, 2, 4, 2, 0, 2, 0, false],
-  [5, 2, 4, 2, 0, 2, 0, false], [6, 2, 4, 3, 0, 2, 0, false], [6, 2, 4, 3, 0, 2, 0, false],
-  [4, 2, 4, 0, 0, 2, 0, false], [7, 2, 4, 4, 0, 2, 0, false], [7, 2, 4, 4, 0, 2, 0, false],
-  [6, 2, 4, 0, 0, 2, 0, false], [8, 2, 4, 5, 0, 2, 0, false], [8, 1, 4, 5, 0, 2, 0, false],
-  [8, 1, 4, 5, 0, 2, 0, false], [6, 2, 4, 0, 0, 2, 0, false], [8, 1, 4, 5, 0, 2, 0, false],
-  [8, 1, 4, 5, 0, 2, 0, false], [5, 2, 4, 0, 0, 2, 0, false], [6, 1, 3, 4, 0, 2, 0, false],
-  [6, 1, 5, 4, 0, 2, 0, false], [6, 1, 4, 0, 0, 2, 0, false], [8, 1, 4, 5, 1, 2, 0, false],
-  [8, 1, 4, 5, 1, 2, 0, false], [6, 1, 4, 0, 0, 2, 0, false], [8, 1, 4, 5, 0, 2, 1, false],
-  [8, 1, 4, 5, 1, 2, 1, false], [7, 0, 4, 4, 0, 2, 0, true], [6, 2, 5, 0, 0, 2, 0, false],
+  [2, 2, 4, 0, 0, 2, 0, false, null], [3, 2, 4, 0, 0, 2, 0, false, 104], [3, 2, 4, 0, 0, 2, 0, false, 103],
+  [4, 2, 4, 1, 0, 2, 0, false, 106], [4, 2, 4, 1, 0, 2, 0, false, 105], [5, 2, 4, 2, 0, 2, 0, false, 108],
+  [5, 2, 4, 2, 0, 2, 0, false, 107], [6, 2, 4, 3, 0, 2, 0, false, 110], [6, 2, 4, 3, 0, 2, 0, false, 109],
+  [4, 2, 4, 0, 0, 2, 0, false, null], [6, 1, 4, 0, 0, 2, 0, false, 127], [7, 2, 4, 4, 0, 2, 0, false, null],
+  [7, 2, 4, 4, 0, 2, 0, false, 112], [6, 2, 4, 0, 0, 2, 0, false, 118], [8, 1, 4, 5, 0, 2, 0, false, null],
+  [8, 1, 4, 5, 0, 2, 0, false, 119], [6, 2, 4, 0, 0, 2, 0, false, 114], [8, 2, 4, 5, 0, 2, 0, false, 115],
+  [8, 1, 4, 5, 0, 2, 0, false, 117], [6, 2, 4, 0, 0, 2, 0, false, null], [6, 1, 3, 4, 0, 2, 0, false, null],
+  [6, 1, 4, 0, 0, 2, 0, false, 124], [8, 1, 4, 5, 0, 2, 0, false, 120], [6, 1, 5, 4, 0, 2, 0, false, 123],
+  [8, 1, 4, 5, 1, 2, 0, false, null], [8, 1, 4, 5, 1, 2, 0, false, 125], [8, 1, 4, 5, 0, 2, 1, false, null],
+  [8, 1, 4, 5, 1, 2, 1, false, null], [7, 0, 4, 4, 0, 2, 0, true, null], [6, 2, 5, 0, 0, 2, 0, false, null],
 ];
 
-test('AC-01：30 关参数与 PRD §4 总表逐项一致', () => {
+test('AC-01：30 关参数与重排后总表逐项一致（含冻结 seed）', () => {
   assert.strictEqual(LEVELS.length, 30);
   for (let i = 0; i < 30; i++) {
     const lv = LEVELS[i];
-    const [colors, empties, capacity, hidden, condN, condNeed, keyN, noEmpty] = CURVE_TABLE[i];
+    const [colors, empties, capacity, hidden, condN, condNeed, keyN, noEmpty, seed] = CURVE_TABLE[i];
     assert.strictEqual(lv.level, i + 1);
     assert.strictEqual(lv.colors, colors, `L${i + 1} colors`);
     assert.strictEqual(lv.empties, empties, `L${i + 1} empties`);
@@ -96,7 +97,8 @@ test('AC-01：30 关参数与 PRD §4 总表逐项一致', () => {
     assert.strictEqual(lv.condLockNeed, condNeed, `L${i + 1} condLockNeed`);
     assert.strictEqual(lv.keyLockCount, keyN, `L${i + 1} keyLockCount`);
     assert.strictEqual(lv.noEmptyStart, noEmpty, `L${i + 1} noEmptyStart`);
-    assert.strictEqual(lv.seed, DIFFICULTY_CURVE.seedBase + lv.level, 'seed 缺省 = seedBase + 关卡号');
+    const expectSeed = seed ?? DIFFICULTY_CURVE.seedBase + lv.level;
+    assert.strictEqual(lv.seed, expectSeed, `L${i + 1} seed（冻结或缺省 seedBase+关卡号）`);
   }
 });
 
@@ -133,8 +135,8 @@ test('难度曲线颜色数合法（机制首秀关允许降档缓冲，非严�
   }
   assert.ok(LEVELS.some((l) => l.colors === 8), '应存在 8 色关');
   const matcha = LEVELS.filter((l) => l.colors === 8).map((l) => l.level);
-  // L30 改特殊关后 colors=6；L13/L17/L23/L26 改混合关后 colors=6（降档缓冲），列表不再含这些关
-  assert.deepStrictEqual(matcha, [14, 15, 16, 18, 19, 24, 25, 27, 28]);
+  // 重排后 8 色关位于第 15/16/18/19/23/25/26/27/28 关（原 L14~L19/L24/L25/L27/L28 记录）
+  assert.deepStrictEqual(matcha, [15, 16, 18, 19, 23, 25, 26, 27, 28]);
 });
 
 console.log('== 关卡生成 ==');
@@ -187,8 +189,10 @@ test('每关：开局不存在已完成的满瓶纯色，非空瓶数符合发�
   }
 });
 
-test('AC-03：L14 empties=2 / L15 empties=1（空瓶余量递减）', () => {
-  assert.strictEqual(LEVELS[13].empties, 2);
+test('AC-03：8 色关空瓶配置 —— 第 18 关空 2（原 L14），第 15 关空 1（原 L15）', () => {
+  assert.strictEqual(LEVELS[17].colors, 8);
+  assert.strictEqual(LEVELS[17].empties, 2);
+  assert.strictEqual(LEVELS[14].colors, 8);
   assert.strictEqual(LEVELS[14].empties, 1);
 });
 
@@ -489,14 +493,21 @@ test('addBottle：达到 12 瓶上限后失败', () => {
 
 console.log('== 问号隐藏层 ==');
 
-test('关卡配置：第 4 关起隐藏层数量按曲线递增（特殊关强制清零）', () => {
-  assert.strictEqual(LEVELS[0].hiddenCount, 0);
-  assert.strictEqual(LEVELS[3].hiddenCount, 1); // 第 4 关
-  assert.strictEqual(LEVELS[5].hiddenCount, 2); // 第 6 关
-  assert.strictEqual(LEVELS[7].hiddenCount, 3); // 第 8 关
-  assert.strictEqual(LEVELS[8].hiddenCount, 3); // 第 9 关（曲线值 3）
+test('关卡配置：隐藏层数量随难度爬坡（第 4 关起；特殊关/混合关强制清零）', () => {
+  assert.strictEqual(LEVELS[0].hiddenCount, 0); // 第 1 关
+  assert.strictEqual(LEVELS[3].hiddenCount, 1); // 第 4 关（原 L5）
+  assert.strictEqual(LEVELS[5].hiddenCount, 2); // 第 6 关（原 L7）
+  assert.strictEqual(LEVELS[7].hiddenCount, 3); // 第 8 关（原 L9）
+  assert.strictEqual(LEVELS[8].hiddenCount, 3); // 第 9 关（原 L8）
+  assert.strictEqual(LEVELS[11].hiddenCount, 4); // 第 12 关（原 L12）
+  assert.strictEqual(LEVELS[14].hiddenCount, 5); // 第 15 关 8 色首秀（原 L15）
   assert.strictEqual(LEVELS[9].hiddenCount, 0); // 第 10 关特殊关强制清零（S-01）
-  assert.strictEqual(LEVELS[11].hiddenCount, 4); // 第 12 关（override 4）恢复正常曲线
+  assert.strictEqual(LEVELS[19].hiddenCount, 0); // 第 20 关特殊关强制清零
+  for (const i of [10, 13, 16, 21]) {
+    // 混合关槽位 11/14/17/22：锁与隐藏强制清零（v1 不叠加）
+    assert.strictEqual(LEVELS[i].hiddenCount, 0, `第 ${i + 1} 关混合关 hiddenCount 应为 0`);
+    assert.strictEqual(LEVELS[i].mix, true, `第 ${i + 1} 关应为混合关`);
+  }
 });
 
 test('隐藏层标记：数量正确、全部位于非顶层、同 seed 可复现', () => {
@@ -569,9 +580,9 @@ test('cap=3/5/8 生成：每色总量=capacity、满瓶判定按 capacity、生�
   }
 });
 
-test('容量非 4 关卡倒水/完成/撤回链路正确（L22 cap=5）', () => {
+test('容量非 4 关卡倒水/完成/撤回链路正确（第 24 关 cap=5，原 L22）', () => {
   const logic = new GameLogic();
-  logic.loadLevel(LEVELS[21]);
+  logic.loadLevel(LEVELS[23]); // 第 24 关 cap5 首秀（原 L22）
   assert.strictEqual(logic.capacity, 5);
   // 构造满 5 层完成：源顶层 4 层 1 倒入已有 1 层 1 的目标 → 5 层满纯色
   logic.bottles = [[2, 1, 1, 1, 1], [1], []];
@@ -634,13 +645,13 @@ test('AC-04：完成第 N 个成品 → 解锁可倒；undo 恢复锁定（AC-06
   assert.ok(logic.isLocked(1), 'undo 应恢复锁定状态');
 });
 
-test('L24 条件锁生成：锁瓶含内容（Q3=B），生成即带锁可解', () => {
-  const cfg = LEVELS[23];
+test('第 26 关（原 L24）条件锁生成：锁瓶含内容（Q3=B），生成即带锁可解', () => {
+  const cfg = LEVELS[25];
   assert.strictEqual(cfg.condLockCount, 1);
   const logic = new GameLogic();
   logic.loadLevel(cfg);
   const condLock = logic.locks.find((l) => l.type === 'cond');
-  assert.ok(condLock, 'L24 应有条件锁');
+  assert.ok(condLock, '应有条件锁');
   assert.strictEqual(condLock.need, 2);
   assert.ok(logic.bottles[condLock.bottle].length > 0, '条件锁瓶应含内容（方案 B）');
   assert.ok(logic.isLocked(condLock.bottle));
@@ -763,7 +774,7 @@ test('shuffleOne：锁定瓶与钥匙所在瓶（未解锁）拒绝打乱', () =
 
 test('addBottle：新增瓶无锁，锁定瓶操作序列后连续 undo 完整回退（AC-06 交叉）', () => {
   const logic = new GameLogic();
-  logic.loadLevel(LEVELS[23]); // L24 条件锁
+  logic.loadLevel(LEVELS[25]); // 第 26 关（原 L24）条件锁
   const lockBottle = logic.locks[0].bottle;
   const before = logic.bottles.map((b) => b.slice());
   assert.ok(logic.addBottle());
@@ -794,7 +805,7 @@ const SPECIAL_IDX = [9, 19, 29]; // L10 / L20 / L30 原位替换为特殊关（�
 test('AC-01：L10/L20/L30 特殊关 schema —— special/bigCapacity 透传，叠加机制强制清零，其余 27 关不带 special', () => {
   const expect = [
     { colors: 4, capacity: 4, bigCapacity: 8, empties: 2 },
-    { colors: 5, capacity: 4, bigCapacity: 6, empties: 2 },
+    { colors: 6, capacity: 4, bigCapacity: 6, empties: 2 }, // 重排时单独加压：colors 5→6
     { colors: 6, capacity: 5, bigCapacity: 8, empties: 2 },
   ];
   for (let s = 0; s < SPECIAL_IDX.length; s++) {
@@ -1080,7 +1091,7 @@ test('R3 交叉：hasAnyMove 含大瓶 —— 大瓶非空可作源；仅剩大�
 
 console.log('== 混合容量瓶（PRD-混合容量瓶 / AC-1~AC-6） ==');
 
-const MIX_IDX = [12, 16, 22, 25]; // L13/L17/L23/L26
+const MIX_IDX = [10, 13, 16, 21]; // 第 11/14/17/22 关（重排后混合关，原 L26/L17/L13/L23 记录）
 
 /** 构造固定混合局面（注入 caps，与 loadFixed 同思路） */
 function loadMixFixed(bottles, caps, { colors = 0, capacity = 4 } = {}) {
@@ -1096,7 +1107,7 @@ function loadMixFixed(bottles, caps, { colors = 0, capacity = 4 } = {}) {
 test('MX-1/AC-1：混合关 schema —— mix 透传、锁/隐藏/无空瓶强制 0、special 剥离；其余 26 关不带 mix', () => {
   assert.deepStrictEqual(
     LEVELS.filter((l) => l.mix).map((l) => l.level),
-    [13, 17, 23, 26]
+    [11, 14, 17, 22]
   );
   for (const idx of MIX_IDX) {
     const lv = LEVELS[idx];
@@ -1184,7 +1195,7 @@ test('MX-4/AC-5：isWin —— 拆色（cap3 提前完成 + 剩层在场）不�
 });
 
 test('MX-5/AC-6：混合关交互链路 —— addBottle 新瓶=标准容量、caps 平行、undo 同步；shuffle 按各瓶容量且必有解可撤销', () => {
-  const cfg = LEVELS[12]; // L13
+  const cfg = LEVELS[10]; // 第 11 关混合首秀（原 L26 记录）
   const logic = new GameLogic();
   logic.loadLevel(cfg);
 

@@ -330,7 +330,7 @@ check('AC-09：容量自适应渲染（cap=3/5/8、无图片资源矢量降级�
   main.tick();
   main.selected = -1;
 
-  main.loadLevel(21); // L22 容量 5
+  main.loadLevel(23); // 第 24 关容量 5（重排后 cap5 首秀，原 L22）
   assert.strictEqual(renderer.capacity, 5);
   main.tick();
   assertBottlesInSafeArea();
@@ -340,8 +340,8 @@ check('AC-09：容量自适应渲染（cap=3/5/8、无图片资源矢量降级�
   assertBottlesInSafeArea();
 });
 
-check('AC-09：L24 条件锁渲染不抛错、锁定瓶点击为抖动反馈不选中', () => {
-  main.loadLevel(23);
+check('AC-09：第 26 关（原 L24）条件锁渲染不抛错、锁定瓶点击为抖动反馈不选中', () => {
+  main.loadLevel(25);
   assert.ok(logic.locks.some((l) => l.type === 'cond'));
   main.tick(); // 锁形角标 + 进度文本矢量绘制
   const locked = logic.locks.find((l) => l.type === 'cond').bottle;
@@ -722,8 +722,8 @@ check('设置页兑换码输入：unlock_all 解锁全部关卡、无效码提�
   main.scene = 'menu';
 });
 
-check('混合容量关渲染：L13 底对齐、瓶高 ∝ 容量、安全区、绘制不抛错、触摸命中按实际 rect（PRD-混合容量瓶 AC-7/8）', () => {
-  main.loadLevel(12); // L13 混合首秀
+check('混合容量关渲染：第 11 关（原 L26）底对齐、瓶高 ∝ 容量、安全区、绘制不抛错、触摸命中按实际 rect（PRD-混合容量瓶 AC-7/8）', () => {
+  main.loadLevel(10); // 第 11 关混合首秀（重排后）
   main.scene = 'game'; // loadLevel 不切场景（与既有用例同口径）
   main.tick();
   assert.ok(logic.mix, '应为混合关');
