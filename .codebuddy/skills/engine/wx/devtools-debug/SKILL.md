@@ -12,8 +12,9 @@
 |---|---|---|---|
 | 1 | **MCP**（`scripts/wxmcp.mjs`） | 编译 / 截图 / console 日志 / 渲染层 JS | ✅ 稳定（走 IDE 服务端口） |
 | 2 | **PrintWindow**（`scripts/printwin.mjs`） | 整窗截图（无需前台/不受遮挡/锁屏可用） | ✅ 稳定 |
-| 3 | automator（9420 端口） | 触摸注入 / 逻辑层 evaluate | ❌ 本机长期挂起（connect OK 但 API 无响应），勿依赖 |
-| 4 | 系统级 RPA（`scripts/uiauto.mjs`） | 截屏 + 鼠标注入 | ⚠️ 截屏可用；点击打不进 Chromium 内容区 |
+
+> 已废弃通道（勿再投入）：automator 9420（长期挂起）、系统级 RPA（点击打不进
+> Chromium 内容区，截图被 PrintWindow 完全覆盖，脚本已删除，经验沉淀在 EXPERIENCE.md）。
 
 ## MCP 快速用法
 
@@ -86,13 +87,5 @@ devtools-debug/
 └── scripts/            全部为通用脚本（WX_PROJECT/WX_TOOLS_DIR/WX_MCP_TOKEN 可覆盖路径与凭证）
     ├── wxmcp-lib.mjs   MCP 会话库（startSession/withTimeout，供 CLI 与项目测试脚本 import）
     ├── wxmcp.mjs       MCP CLI 薄壳（shot/refresh/console/eval/open/call/schema），基于 wxmcp-lib
-    ├── printwin.mjs    PrintWindow 整窗截图（备用通道）
-    ├── activate-win.mjs 激活工具窗口（前台+TOPMOST+移主屏）
-    ├── uiauto.mjs      系统级 RPA（截屏+点击；点击对 Chromium 无效，留档备用）
-    ├── build-winapi.ps1 编译 WinApi.dll（改 C# 后重跑；需 UTF-8 BOM）
-    ├── WinApi.dll      预编译 user32 P/Invoke 集合
-    └── jobs/           schtasks job 临时目录（自动清理）
-
-项目专属内容（不放本 skill）：
-  tests/mcp-smoke.mjs   本项目 MCP 链路冒烟（refresh→截图→console 无 error），npm run mcp-smoke
+    └── printwin.mjs    PrintWindow 整窗截图（备用通道；job 临时文件写项目 temp/devtools-debug，运行后自动清理）
 ```

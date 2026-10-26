@@ -11,7 +11,8 @@ const HERE = fileURLToPath(new URL('.', import.meta.url)).replace(/[\\/]$/, '');
 // 通用脚本：项目根取 WX_PROJECT 环境变量或当前工作目录（稳定版窗口标题 = 项目目录名）
 const ROOT = (process.env.WX_PROJECT || process.cwd()).replace(/[\\/]+$/, '');
 const OUT_DIR = `${ROOT}\\screenshots`;
-const JOB_DIR = `${HERE}\\jobs`;
+// job 临时文件放项目 temp/（.gitignore 已忽略 temp/**），避免污染 skill 目录；WX_JOB_DIR 可覆盖
+const JOB_DIR = process.env.WX_JOB_DIR || `${ROOT}\\temp\\devtools-debug`;
 const name = process.argv[2] || 'pw';
 const WIN_TITLE = ROOT.split(/[\\/]/).pop(); // 稳定版 devtools 窗口标题 = 项目目录名
 mkdirSync(JOB_DIR, { recursive: true });
@@ -77,3 +78,6 @@ for (let i = 0; i < 30; i++) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
 }
 try { execSync('schtasks /Delete /TN WSPW /F', { stdio: 'ignore' }); } catch (e) { /* 忽略 */ }
+// 运行后清理 job 脚本与 done 文件（否则每次截图永久残留一对，越积越多）
+try { rmSync(job); } catch (e) { /* 忽略 */ }
+try { rmSync(done); } catch (e) { /* 忽略 */ }
