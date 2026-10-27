@@ -11,6 +11,7 @@
   },
   "devDependencies": {
     "miniprogram-automator": "^0.13.0",
-    "miniprogram-automator-next": "^0.1.1"
+    "miniprogram-automator-next": "^0.1.1",
+    "pngjs": "^7.0.0"
   }
 }

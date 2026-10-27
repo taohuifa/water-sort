@@ -349,3 +349,39 @@ exit(195,470)→主菜单 ✓。pauseExitBtn 中心 (195,470)；menuPlayBtn 中�
   chroma smoothstep(18,48) 拆 base/果汁两层，自重组误差 0.15%
 - 滤色缓存构建失败会静默 catch 降级，截图看不出来——必须加一次性 console 标记
   （grep console）确认缓存真建成了，再清掉标记
+
+## 2026-10-27 追加 4（液面帽素材管线 + PS 批处理坑）
+
+### imagegen `transparent=true` 透明差分管线不可靠（重要）
+- 白底+黑底两次渲染差分在**大面积纯色扁平形状**上会误判：9 张液面帽中 4 张
+  （橙/芒果黄/青苹果/抹茶）主体出现黑色斑纹 + 大块透明区，渲染时透出白瓶身
+  形成"泡沫块"。蓝/紫/奶白/灰紫/红 5 张正常——**损坏是概率性的，必须逐张肉眼验收**
+- 解法：改走绿幕管线（`#00FF00` 背景 prompt + 严格色键 `G>200 && R<120 && B<120`，
+  与 fix-apple-green.ps1 同口径），9/9 干净。近似色（青苹果浅绿 vs 绿幕）靠
+  R<120 卡阈值区分（青苹果 R≈139 过不了键）
+- 帽素材 prompt 要点：CONCAVE elliptical surface（中间下凹两端翘）、
+  side outlines 向下延伸出图、**bottom OPEN 无边框**（否则拼接到柱身多一条横线）、
+  白高光点+竖高光条
+
+### 液面帽渲染三参数（renderer.js drawBottleLiquid）
+- **帽要压扁**：素材 2.1:1 按宽度等比画出约 1.1 个层高，参考图液面弧仅 0.3~0.4
+  层高 → 帽高 ×0.6，1 格带不再被帽子占满
+- **mid 上缘内缩要够**：4px 仍会采到柱图圆顶描边残留（帽底平切线+残留线=双线），
+  加深到 10px 解决
+- **绘制顺序**：mid/bot 先画、帽最后叠加并向下多压 2px 盖住 mid 顶缘过渡像素；
+  顺序反了残留线盖不住
+- 跨素材色板偏差用后处理拉齐：采样柱图体色 vs 帽体色求每通道比
+  （clamp 0.75~1.35），只调主体像素（白高光 min>230、深描边 max<100 不动）
+
+### PS 批处理新坑
+- **一行命令连环拉起多个 `powershell -File` 子进程时 `Add-Type -AssemblyName
+  System.Drawing` 会随机失效**（类型找不到、byte[] 构造失败）——单独跑正常。
+  解法：循环写进单个 ps1 脚本内单进程执行
+- **GDI+ 保存回原路径报"一般性错误"/文件被锁**：`Image.FromFile` 的底层流不关。
+  解法：字节流加载（`File.ReadAllBytes` → `MemoryStream` → `FromStream`，即时
+  Dispose）+ 保存走 MemoryStream → `File.WriteAllBytes`
+
+### 素材写入触发重载的连带效应
+- 向 assets/ 写图片 → IDE watch 触发重编译 → guest reload。若正好打断图片加载，
+  渲染器**静默降级到矢量画法**（无描边/无高光的纯色块），极易误判"改坏了"。
+  素材写完后必须干净 refresh 一次再验证；`wx.mjs state` scene 重置回 menu 即重载标志

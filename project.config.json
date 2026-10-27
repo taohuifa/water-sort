@@ -64,7 +64,15 @@
         "type": "folder"
       },
       {
+        "value": "assets/images/bottle-src",
+        "type": "folder"
+      },
+      {
         "value": "assets/images/backup",
+        "type": "folder"
+      },
+      {
+        "value": "temp",
         "type": "folder"
       },
       {

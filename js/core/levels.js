@@ -12,7 +12,7 @@ export const COLORS = [
   { name: '青苹果', main: '#8BD450', deep: '#6BB032' },
   { name: '蓝莓', main: '#5B8DEF', deep: '#3A6BD4' },
   { name: '葡萄', main: '#A26BF2', deep: '#7F44D6' },
-  { name: '椰子', main: '#F3EAD7', deep: '#D8C9A8' },
+  { name: '奶昔', main: '#F3DDB4', deep: '#DCC49A' },
   { name: '抹茶', main: '#4FB08C', deep: '#338F6C' },
 ];
 
