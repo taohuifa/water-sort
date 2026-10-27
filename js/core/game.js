@@ -31,6 +31,7 @@ export default class GameLogic {
     this.mix = false; // 混合容量关标记（PRD-混合容量瓶）
     this.caps = []; // 与 bottles 平行的每瓶容量数组（仅混合关填充，其余关为空）
     this.bigColor = -1; // 大瓶限定收集色（瓶口颜色限制：只收该颜色，普通关 -1）
+    this.maxBottles = 12; // 加瓶上限（配置可覆盖：levels.json defaults/levels[n].maxBottles）
   }
 
   /** 载入关卡（同 seed 局面完全一致，可复现）。新参数全部可选，缺省保持旧行为 */
@@ -47,8 +48,10 @@ export default class GameLogic {
     special = null,
     bigCapacity = 0,
     mix = false,
+    maxBottles = 12,
   }) {
     this.capacity = capacity;
+    this.maxBottles = maxBottles;
     this.colorCount = colors;
     this.noEmptyStart = noEmptyStart;
     this.special = special === 'bigBottle' ? 'bigBottle' : null;
@@ -163,6 +166,7 @@ export default class GameLogic {
       }
     }
     // 兜底：全部尝试失败的概率极低；返回最后一次（keyLayer 置空避免隐藏误标）
+    if (!this.lastGenSolvable) console.warn('[game] 关卡生成 5s 预算内未验证出可解局面，兜底返回最后尝试（存在不可解风险）');
     return { bottles: last.bottles, locks: last.locks, keyLayer: null };
   }
 
@@ -325,6 +329,7 @@ export default class GameLogic {
         return { bottles, locks: [], keyLayer: null, bigColor: target };
       }
     }
+    if (!this.lastGenSolvable) console.warn('[game] 大瓶关生成 5s 预算内未验证出可解局面，兜底返回最后尝试（存在不可解风险）');
     return { bottles: last.bottles, locks: [], keyLayer: null, bigColor: last.target };
   }
 
@@ -412,6 +417,7 @@ export default class GameLogic {
         return { bottles, caps, locks: [], keyLayer: null };
       }
     }
+    if (!this.lastGenSolvable) console.warn('[game] 混合关生成 5s 预算内未验证出可解局面，兜底返回最后尝试（存在不可解风险）');
     return { bottles: last.bottles, caps: last.caps, locks: [], keyLayer: null };
   }
 
@@ -706,6 +712,9 @@ export default class GameLogic {
   // ---------- 道具（方案 4） ----------
 
   /**
+   * shortcut: 全场打乱已被选瓶打乱（shuffleOne）取代，生产代码无调用方、仅测试引用；
+   * 产品确认回补「全场重排」玩法时恢复启用，否则应整体删除（含 undo 的 shuffle 分支）。
+   *
    * 道具·打乱：收拢场上全部液体重新随机分装（隐藏层全部揭示），保证有解。
    * 重排后液体依次装满前若干瓶，其余为空瓶（空瓶只增不减，救死局用）。
    * 锁瓶适配（R4/R5）：
@@ -831,7 +840,7 @@ export default class GameLogic {
    * @returns {boolean} 是否成功（达到布局上限则失败）
    */
   addBottle() {
-    if (this.bottles.length >= 12) return false;
+    if (this.bottles.length >= this.maxBottles) return false; // 上限走配置（levels.json maxBottles，缺省 12）
     this.bottles.push([]);
     if (this.mix) this.caps.push(this.capacity); // 新瓶 = 标准容量中转位（PRD-混合容量瓶 §4.1）
     this.undoStack.push({ type: 'addBottle', idx: this.bottles.length - 1 });

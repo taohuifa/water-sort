@@ -13,12 +13,37 @@ const INTRO_KEY = 'juicesort_big_intro'; // 特殊关首进引导已读标志（
 const LEVEL_CONFIG_PATH = 'assets/config/levels.json'; // 关卡难度曲线配置
 const ADS_CONFIG_PATH = 'assets/config/ads.json'; // 广告位配置
 
-// 外部配置加载（JSONC 内容带注释，加载时剥离注释）
-const readConfig = (path) => parseJsonc(wx.getFileSystemManager().readFileSync(path, 'utf8'));
-const LEVEL_CONFIG = readConfig(LEVEL_CONFIG_PATH);
+// 运行环境判定：正式版 = release；开发者工具/体验版/Node 冒烟桩读不到 → 非 release
+// （容错与调试能力只在非正式版保留，兑换码后门同理）
+const IS_RELEASE = (() => {
+  try {
+    return (
+      typeof wx !== 'undefined' &&
+      wx.getAccountInfoSync &&
+      wx.getAccountInfoSync().miniProgram.envVersion === 'release'
+    );
+  } catch (e) {
+    return false;
+  }
+})();
+
+// 外部配置加载（JSONC 内容带注释，加载时剥离注释）。
+// 失败降级到内置兜底：配置损坏不再白屏（关卡表降为 1 关可玩、广告走开发模式直发）
+const readConfig = (path, fallback) => {
+  try {
+    return parseJsonc(wx.getFileSystemManager().readFileSync(path, 'utf8'));
+  } catch (e) {
+    console.error(`[config] ${path} 加载失败，降级使用内置兜底`, e);
+    return fallback;
+  }
+};
+const LEVEL_CONFIG = readConfig(LEVEL_CONFIG_PATH, {
+  levelCount: 1,
+  defaults: { colors: 4, empties: 2 },
+});
 const LEVELS = buildLevelsFromConfig(LEVEL_CONFIG);
 const LEVEL_COUNT = LEVELS.length;
-const ADS_CONFIG = readConfig(ADS_CONFIG_PATH);
+const ADS_CONFIG = readConfig(ADS_CONFIG_PATH, { rewardedAdUnitId: '' });
 // 特殊关标记（关卡选择页角标用，S-09）
 const SPECIAL_FLAGS = LEVELS.map((l) => l.special === 'bigBottle');
 
@@ -78,8 +103,9 @@ export default class Main {
     this.tick = this.tick.bind(this);
     requestAnimationFrame(this.tick);
 
-    // 自动化/调试挂载：供 miniprogram-automator evaluate 驱动场景切换与截图
-    if (typeof GameGlobal !== 'undefined') GameGlobal.main = this;
+    // 自动化/调试挂载：供 miniprogram-automator evaluate 驱动场景切换与截图（正式版不挂载）
+    if (!IS_RELEASE && typeof GameGlobal !== 'undefined') GameGlobal.main = this;
+    this.debugBridge = !IS_RELEASE; // 调试状态桥开关：正式版关闭（省去每 2s 心跳写 storage）
   }
 
   /** 菜单 → 关卡选择页 */
@@ -362,10 +388,16 @@ export default class Main {
     });
   }
 
-  /** 校验输入的兑换码。unlock_all：解锁全部关卡（测试验收用），大小写不敏感。 */
+  /** 校验输入的兑换码。unlock_all：解锁全部关卡（测试验收用），大小写不敏感。
+   *  正式版一律无效（GM 后门只在开发工具/体验版可用）。 */
   applyKey(code) {
     const key = String(code == null ? '' : code).trim().toLowerCase();
     if (!key) return;
+    if (IS_RELEASE) {
+      this.renderer.showToast('兑换码无效');
+      this.audio.play('invalid');
+      return;
+    }
     if (key === 'unlock_all') {
       this.cleared = LEVEL_COUNT;
       wx.setStorageSync(CLEARED_KEY, this.cleared);
@@ -624,7 +656,7 @@ export default class Main {
       specials: SPECIAL_FLAGS,
     });
 
-    this.syncDebugState();
+    if (this.debugBridge) this.syncDebugState();
 
     requestAnimationFrame(this.tick);
   }

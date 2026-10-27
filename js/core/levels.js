@@ -104,6 +104,7 @@ export function buildLevelsFromConfig(cfg) {
       mix: r.mix ?? defaults.mix ?? false,
       special: r.special ?? defaults.special ?? null,
       bigCapacity: num(r.bigCapacity, num(defaults.bigCapacity, 0)),
+      maxBottles: num(r.maxBottles, num(defaults.maxBottles, 12)), // 加瓶上限（GameLogic.addBottle 用）
       props: { shuffle: 1, addBottle: 1, ...(defaults.props || {}), ...(r.props || {}) },
       // 逐关随机种子（满意局面固化）：缺省 = seedBase + 关卡号
       seed: typeof r.seed === 'number' ? r.seed : seedBase + i,

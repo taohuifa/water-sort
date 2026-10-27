@@ -33,6 +33,7 @@
     "mix": false,          // 混合容量关（瓶 3~5 大小混装）
     "special": null,       // 特殊关（v1 仅 bigBottle）
     "bigCapacity": 0,      // 大瓶容量（special 时必填、需 ≥ capacity）
+    "maxBottles": 12,      // 加瓶上限（道具加瓶时瓶子总数不得超过此值）
     "props": { "shuffle": 1, "addBottle": 1 } // 道具出厂（≥L10 各关显式归零，仅广告补给）
   },
 

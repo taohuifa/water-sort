@@ -10,6 +10,7 @@ export default class Ads {
   constructor({ adUnitId = '' } = {}) {
     this.adUnitId = adUnitId;
     this.ad = null;
+    this.pending = false; // 一次广告在途标志（防 show() 异步期间重复触发双发奖励）
     if (adUnitId && typeof wx !== 'undefined' && wx.createRewardedVideoAd) {
       try {
         this.ad = wx.createRewardedVideoAd({ adUnitId });
@@ -27,12 +28,18 @@ export default class Ads {
    * @param {Function} onReward 奖励回调（看完广告或降级时调用）
    */
   watch(onReward) {
+    if (this.pending) return; // 在途广告未结束前忽略重复触发
     if (!this.ad) {
       onReward(); // 开发模式：直接发放
       return;
     }
+    this.pending = true;
+    const settle = () => {
+      this.pending = false;
+    };
     const handler = (res) => {
       this.ad.offClose(handler);
+      settle();
       if (!res || res.isEnded) onReward(); // 中途关闭不发放
     };
     this.ad.onClose(handler);
@@ -43,6 +50,7 @@ export default class Ads {
         .then(() => this.ad.show())
         .catch(() => {
           this.ad.offClose(handler);
+          settle();
           onReward();
         });
     });
