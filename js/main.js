@@ -55,6 +55,7 @@ export default class Main {
     this.shuffleSelecting = false; // 打乱选瓶模式：点瓶打乱其层序
     this.bigIntro = false; // 特殊关首进引导浮层（本机已读后不再弹出）
     this.bigIntroShown = wx.getStorageSync(INTRO_KEY) === true;
+    this._dbgSig = ''; // 调试状态快照签名（devtools automation 观测用）
 
     // ---------- 音效（WebAudio 合成，开关持久化） ----------
     this.soundOn = wx.getStorageSync(SOUND_KEY) !== false; // 默认开
@@ -500,6 +501,54 @@ export default class Main {
 
   // ---------- 主循环 ----------
 
+  /**
+   * 调试状态快照（devtools automation 观测桥，协议见 skill ADAPTATION.md）：
+   * 逻辑层与渲染层分离，外部工具经渲染层 wx.getStorageSync 读本快照判断场景。
+   * 状态签名变化立即写；稳态下每 2s 心跳刷新时间戳（供读取方判活）。
+   * btns 为自描述按钮表（工具零硬编码）：
+   *   对象型 {xy, scenes, when?}——scenes=可用场景；when={字段:true=真值/其他=严格相等}
+   *   数组型 {alias, base, list, scenes}——tbtn <alias> <序号>（base 起算）
+   */
+  syncDebugState() {
+    const R = this.renderer;
+    const cRect = (b) => (b ? [Math.round(b.x + b.w / 2), Math.round(b.y + b.h / 2)] : null);
+    const cCircle = (b) => (b ? [Math.round(b.x), Math.round(b.y)] : null);
+    const sig = [this.scene, this.pauseOverlay, this.levelIndex, this.selected,
+      this.winPanel, this.adConfirm, this.shuffleSelecting, this.cleared,
+      this.bigIntro, R.levelScroll].join('|');
+    const now = Date.now();
+    if (sig === this._dbgSig && now - this._dbgTs < 2000) return;
+    this._dbgSig = sig;
+    this._dbgTs = now;
+    try {
+      wx.setStorageSync('__dbg_state', {
+        scene: this.scene, pause: this.pauseOverlay, level: this.levelIndex,
+        sel: this.selected, win: this.winPanel, ad: this.adConfirm,
+        shuf: this.shuffleSelecting, cleared: this.cleared, intro: this.bigIntro, t: now,
+        btns: {
+          play: {xy: cRect(R.menuPlayBtn), scenes: ['menu']},
+          settings: {xy: cRect(R.menuSettingsBtn), scenes: ['menu']},
+          back: {xy: cCircle(R.backBtn), scenes: ['levelSelect', 'settings', 'game']},
+          pause_resume: {xy: cRect(R.pauseResumeBtn), scenes: ['game'], when: {pause: true}},
+          pause_exit: {xy: cRect(R.pauseExitBtn), scenes: ['game'], when: {pause: true}},
+          next: {xy: cRect(R.nextBtn), scenes: ['game'], when: {win: true}},
+          undo: {xy: cCircle(R.undoBtn), scenes: ['game']},
+          shuffle: {xy: cCircle(R.shuffleBtn), scenes: ['game']},
+          add_bottle: {xy: cCircle(R.addBottleBtn), scenes: ['game']},
+          restart: {xy: cCircle(R.restartBtn), scenes: ['game']},
+          sound_toggle: {xy: cRect(R.settingsSoundToggle), scenes: ['settings']},
+          settings_reset: {xy: cRect(R.settingsResetBtn), scenes: ['settings']},
+          settings_key: {xy: cRect(R.settingsKeyBtn), scenes: ['settings']},
+          ad_watch: {xy: cRect(R.adConfirmWatchBtn), scenes: ['game'], when: {ad: true}},
+          ad_cancel: {xy: cRect(R.adConfirmCancelBtn), scenes: ['game'], when: {ad: true}},
+          big_intro: {xy: cRect(R.bigIntroBtn), scenes: ['game'], when: {intro: true}},
+          levels: {alias: 'level', base: 1, scenes: ['levelSelect'], list: R.levelBtns.map((b) => cRect(b))},
+          bottles: {alias: 'bottle', base: 0, scenes: ['game'], list: R.bottleRects.map((b) => cRect(b))},
+        },
+      });
+    } catch (e) { /* storage 不可用时静默（不影响游戏） */ }
+  }
+
   tick() {
     const now = Date.now();
     const dt = Math.min((now - this.lastTs) / 1000, 0.05);
@@ -546,6 +595,8 @@ export default class Main {
       bigIntro: this.bigIntro,
       specials: SPECIAL_FLAGS,
     });
+
+    this.syncDebugState();
 
     requestAnimationFrame(this.tick);
   }

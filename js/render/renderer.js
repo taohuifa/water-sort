@@ -73,8 +73,16 @@ export default class Renderer {
       load(`drink${c}`, `assets/images/backup/drink-${c}.png`); // 货架成品奶茶杯贴图（同上）
     }
     load('liquidHidden', 'assets/images/backup/liquid-hidden.png'); // 隐藏层神秘灰紫液柱（同上）
-    // 白模板滤色方案：三张模板 + 启动时离屏合成各色缓存（合成失败走上方原贴图/矢量降级）
-    load('liquidWhite', 'assets/images/liquid-white.png', () => this.buildLiquidTints());
+    // AI 逐色生成的液体柱插画（图生图锁定参考图风格，图自带描边/高光/阴影）
+    for (let c = 0; c < 8; c++) {
+      load(`liquidAI${c}`, `assets/images/liquid/liquid-ai-${c}.png`);
+    }
+    load('liquidAIHidden', 'assets/images/liquid/liquid-ai-hidden.png', () => this.buildLiquidTints());
+    // AI 液面帽（下凹椭圆液面，底边开口）：仅顶带使用，与液柱同宽 132px
+    for (let c = 0; c < 8; c++) {
+      load(`liquidAICap${c}`, `assets/images/liquid/liquid-ai-cap-${c}.png`);
+    }
+    load('liquidAICapHidden', 'assets/images/liquid/liquid-ai-cap-hidden.png');
     load('drinkBase', 'assets/images/drink-base.png');
     load('drinkJuice', 'assets/images/drink-juice.png', () => this.buildDrinkTints());
   }
@@ -110,15 +118,26 @@ export default class Renderer {
     return oc;
   }
 
-  /** 液柱滤色缓存：8 色 + 隐藏层灰紫（#9E8FB5） */
+  /** AI 液体柱直引缓存：8 色插画 + 隐藏层灰紫（无需滤色，贴图即插画） */
   buildLiquidTints() {
-    try {
-      const tpl = this.images.liquidWhite;
-      this.liquidTint = COLORS.map(c => this.tintCanvas(tpl, this.hexRgb(c.main)));
-      this.liquidTintHidden = this.tintCanvas(tpl, [0x9e, 0x8f, 0xb5]);
-    } catch (e) {
-      this.liquidTint = null; // 离屏画布不可用时降级
+    const arr = [];
+    for (let c = 0; c < 8; c++) {
+      const img = this.images[`liquidAI${c}`];
+      if (!img || !img.width) {
+        this.liquidTint3 = null;
+        return;
+      }
+      arr.push(img);
     }
+    const hid = this.images.liquidAIHidden;
+    if (!hid || !hid.width) {
+      this.liquidTint3 = null;
+      return;
+    }
+    this.liquidTint3 = arr;
+    this.liquidTint3Hidden = hid;
+    // 三段切片比例（AI 图）：顶段含液面/顶圆角/高光，底段含底圆角/阴影
+    this.liquidAIFrac = { top: 0.2, bot: 0.16 };
   }
 
   /** 奶茶杯果汁区滤色缓存（杯体结构由 drink-base 提供） */
@@ -984,13 +1003,27 @@ export default class Renderer {
     const { x, y, w, h } = rect;
     const sprite = this.images.bottle;
 
-    // 素材模式：贴图为真半透明玻璃（俯视角瓶口自带），液体先画、玻璃覆在上层
+    // 素材模式：白瓷不透明瓶（贴纸风）三段绘制——瓶口/瓶底按宽等比固定不变形，
+    // 仅瓶中直筒随瓶高伸缩（对齐参考图：不同容量瓶只有中段长短不同）
     if (sprite) {
-      this.drawBottleLiquid(rect, layers, true, keyLayerIdx, cap);
       ctx.save();
       if (ghost) ctx.globalAlpha = 0.5;
-      ctx.drawImage(sprite, x, y, w, h);
+      const bTopPx = sprite.height * 0.24; // 瓶口段（唇边+颈+肩）源像素
+      const bBotPx = sprite.height * 0.12; // 瓶底段（圆底）源像素
+      const bMidPx = sprite.height - bTopPx - bBotPx;
+      const segTopH = bTopPx * (w / sprite.width); // 按宽等比的固定显示高
+      const segBotH = bBotPx * (w / sprite.width);
+      const segMidH = h - segTopH - segBotH;
+      if (segMidH > 0) {
+        ctx.drawImage(sprite, 0, 0, sprite.width, bTopPx, x, y, w, segTopH);
+        ctx.drawImage(sprite, 0, bTopPx, sprite.width, bMidPx, x, y + segTopH, w, segMidH);
+        ctx.drawImage(sprite, 0, bTopPx + bMidPx, sprite.width, bBotPx, x, y + segTopH + segMidH, w, segBotH);
+      } else {
+        // 瓶过矮：整体拉伸兜底
+        ctx.drawImage(sprite, x, y, w, h);
+      }
       ctx.restore();
+      this.drawBottleLiquid(rect, layers, true, keyLayerIdx, cap);
       // 选中态：琥珀色描边（宽度随瓶宽放大，大瓶 1.8× 更醒目）
       if (isSelected) {
         ctx.save();
@@ -1046,10 +1079,10 @@ export default class Renderer {
     if (!layers.length) return;
     const { ctx } = this;
     const { x, y, w, h } = rect;
-    const innerX = fit ? x + w * 0.09 : x + 3.5;
-    const innerW = fit ? w * 0.82 : w - 7;
-    const innerY = fit ? y + h * 0.13 : y + h * 0.08; // 顶部压到玻璃肩部之下
-    const innerH = fit ? h * 0.83 : h * 0.92 - 3.5; // 底部贴近瓶底圆弧
+    const innerX = fit ? x + w * 0.065 : x + 3.5;
+    const innerW = fit ? w * 0.87 : w - 7;
+    const innerY = fit ? y + h * 0.22 : y + h * 0.08; // 液体顶贴参考图（瓶口段下沿）
+    const innerH = fit ? h * 0.73 : h * 0.92 - 3.5; // 底部止于瓶底圆角区之上
     const layerH = innerH / cap;
     const bottomY = innerY + innerH;
     let topY = bottomY;
@@ -1060,7 +1093,7 @@ export default class Renderer {
     // 素材 132x140 紧凑胶囊：圆顶 0~44 / 直筒 45~77 / 圆底 78~140。
     ctx.save();
     if (fit) {
-      this.rr(innerX, innerY, innerW, innerH, innerW * 0.45); // 内轮廓大圆角（近胶囊形），贴合试管圆底
+      this.rr(innerX, innerY, innerW, innerH, innerW * 0.14); // 内轮廓小圆角，直线分层贴合 flat 风格
       ctx.clip();
     }
     const bands = [];
@@ -1091,28 +1124,51 @@ export default class Renderer {
       const deep = band.hidden ? '#8A7BA6' : def && def.deep ? def.deep : c;
       topY = ly;
       topColor = c;
-      const tex = fit && !band.hidden
-        ? (this.liquidTint && this.liquidTint[band.colorId]) || this.images[`liquid${band.colorId}`]
-        : fit && band.hidden
-          ? this.liquidTintHidden || this.images.liquidHidden
-          : null;
-      if (tex) {
-        // 切片：顶帽 [0,60)（圆顶+短直筒）/ 直筒窄条 [62,74) / 底帽 [60,140)（直筒引导+圆底）
-        const sy = isTop ? ly + domeH : ly;
-        if (yBot > sy) {
-          ctx.drawImage(tex, 0, 62, tex.width, 12, liX, sy, liW, yBot - sy); // 直筒按带高拉伸
+      const tex3 = fit && this.liquidTint3
+        ? (band.hidden ? this.liquidTint3Hidden : this.liquidTint3[band.colorId])
+        : null;
+      if (tex3) {
+        // 三段切片组合（AI 插画自带描边/高光/阴影）：连续一柱——
+        // 顶段只画在整柱顶带（液面），底段只画在整柱底带（圆底），中间全部中段无缝拼接。
+        // mid 源切片上下各内缩 4px 避开柱身边缘过渡像素（防止层间浅色缝）
+        const frac = this.liquidAIFrac || { top: 0.2, bot: 0.16 };
+        const srcTopH = tex3.height * frac.top;
+        const srcBotH = tex3.height * frac.bot;
+        const srcMidY = srcTopH + 4;
+        const srcMidH = tex3.height - srcTopH - srcBotH - 8;
+        const scale = liW / tex3.width;
+        // 顶带优先用液面帽贴图（下凹椭圆液面，底边开口与中段无缝衔接）
+        const capTex = band.hidden ? this.images.liquidAICapHidden : this.images[`liquidAICap${band.colorId}`];
+        const capOk = capTex && capTex.width;
+        const capH = capOk ? capTex.height * (liW / capTex.width) : 0;
+        const topH = capH || srcTopH * scale;
+        let segTop = isTop ? topH : 0;
+        let segBot = isBottom ? srcBotH * scale : 0;
+        let segMid = bh - segTop - segBot;
+        if (segMid < 0) {
+          // 带太矮：按比例压缩三段（液面/圆底保留，等比缩小）
+          const factor = bh / (segTop + segBot);
+          segTop *= factor;
+          segBot *= factor;
+          segMid = 0;
         }
-        const lead = botH * (1 - CURVE_FRAC); // 底帽直筒引导段高度
-        if (isBottom) {
-          // 底带：圆底贴瓶底
-          ctx.drawImage(tex, 0, 60, tex.width, 80, liX, yBot - botH, liW, botH);
-        } else {
-          // 上带：圆底下凸压住下一带顶部，形成弧形交界
-          ctx.drawImage(tex, 0, 60, tex.width, 80, liX, yBot - lead, liW, botH);
+        if (segTop > 0) {
+          if (capOk) {
+            ctx.drawImage(capTex, 0, 0, capTex.width, capTex.height, liX, ly, liW, segTop);
+          } else {
+            ctx.drawImage(tex3, 0, 0, tex3.width, srcTopH, liX, ly, liW, segTop);
+          }
         }
-        if (isTop) {
-          ctx.drawImage(tex, 0, 0, tex.width, 60, liX, ly, liW, domeH);
-          topUsedTex = true;
+        if (segMid > 0) {
+          ctx.drawImage(tex3, 0, srcMidY, tex3.width, srcMidH, liX, ly + segTop, liW, segMid + 1);
+        }
+        if (segBot > 0) {
+          ctx.drawImage(tex3, 0, srcTopH + srcMidH + 8, tex3.width, srcBotH, liX, ly + segTop + segMid, liW, segBot);
+        }
+        // 椰子白(#F3EAD7)与白瓷瓶身同色系，叠加淡麦色罩保证层间可辨识
+        if (!band.hidden && band.colorId === 6) {
+          ctx.fillStyle = 'rgba(233, 208, 152, 0.32)';
+          ctx.fillRect(liX, ly, liW, bh + 0.6);
         }
       } else {
         // 降级：带内纵向渐变（上亮下暗）
@@ -1124,7 +1180,7 @@ export default class Renderer {
       }
       if (band.hidden) { // 隐藏带的「?」标记：居中于本带未被上带圆底帽覆盖的可见区
         // 圆底帽由「上面的带」下凸侵入本带顶部（顶带之上无带，不受侵入）——底/中带均会被侵入
-        const coverTop = isTop ? 0 : botH * CURVE_FRAC;
+        const coverTop = 0; // 直线分层无圆底帽侵入
         const midY = ly + (coverTop + bh) / 2; // 可见区 [ly+coverTop, yBot] 的中心
         ctx.fillStyle = 'rgba(255,255,255,0.92)';
         ctx.font = `bold ${Math.max(10, layerH * 0.7)}px sans-serif`;
@@ -1134,7 +1190,8 @@ export default class Renderer {
         ctx.textBaseline = 'alphabetic';
       }
     }
-    // 顶部液面高光：贴图模式自带，仅降级模式代码绘制
+    // AI 插画自带液体柱描边与高光，代码不再叠加
+    // 顶部液面高光：仅降级模式代码绘制
     if (topColor && !topUsedTex) {
       ctx.fillStyle = 'rgba(255,255,255,0.30)';
       ctx.beginPath();
@@ -1151,7 +1208,7 @@ export default class Renderer {
         const bandTopLayer = acc + bnd.count - 1;
         if (keyLayerIdx <= bandTopLayer) {
           if (keyLayerIdx === bandTopLayer && bandTopLayer < layers.length - 1) {
-            coverK = botH * CURVE_FRAC;
+            coverK = 0; // 直线分层无圆底帽侵入
           }
           break;
         }
