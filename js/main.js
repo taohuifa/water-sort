@@ -128,8 +128,9 @@ export default class Main {
   // ---------- 触摸交互 ----------
 
   /**
-   * 触摸事件：start 记录起点 → move 累计位移（关卡选择页驱动竖向滚动）→
-   * end 时位移 < 8px 视为点击派发 onTap（拖动滚动不误触卡片）。
+   * 触摸事件：start 记录起点 + 对当前场景按钮命中检测记录按下态（R1，仅视觉反馈，
+   * 不影响点击派发时序）→ move 累计位移（关卡选择页驱动竖向滚动，超阈值清按下态）→
+   * end 时位移 < 8px 视为点击派发 onTap（拖动滚动不误触卡片）并清除按下态。
    */
   bindTouch() {
     wx.onTouchStart((e) => {
@@ -138,26 +139,43 @@ export default class Main {
       this._touchStart = { x: t.clientX, y: t.clientY };
       this._touchLastY = t.clientY;
       this._touchMoved = false;
+      // 按下态（R1）：命中检测记录 pressed，分支顺序与 onTap 一致
+      this.renderer.pressed = this.renderer.hitButton(t.clientX, t.clientY, {
+        scene: this.scene,
+        winPanel: this.winPanel,
+        bigIntro: this.bigIntro,
+        adConfirm: this.adConfirm,
+        pauseOverlay: this.pauseOverlay,
+      });
     });
     wx.onTouchMove((e) => {
       const t = e.touches && e.touches[0];
       if (!t || !this._touchStart) return;
       const dy = t.clientY - this._touchLastY;
       this._touchLastY = t.clientY;
-      if (Math.abs(t.clientY - this._touchStart.y) > 8) this._touchMoved = true;
+      if (Math.abs(t.clientY - this._touchStart.y) > 8) {
+        this._touchMoved = true;
+        this.renderer.pressed = null; // 位移超阈值（与 onTap 取消阈值同源）清除按下态
+      }
       if (this.scene === 'levelSelect' && this._touchMoved) {
         this.renderer.scrollLevels(dy);
       }
     });
     wx.onTouchEnd(() => {
+      this.renderer.pressed = null; // 抬手即清除按下态（onTap 派发逻辑不变）
       if (this._touchStart && !this._touchMoved) {
         this.onTap(this._touchStart.x, this._touchStart.y);
       }
       this._touchStart = null;
     });
+    wx.onTouchCancel(() => {
+      this.renderer.pressed = null; // 触摸被打断同样清除（AC-08 无残留）
+      this._touchStart = null;
+    });
   }
 
   onTap(x, y) {
+    this.renderer.pressed = null; // 场景切换 / 浮层开关均由 onTap 分支置位，入口统一清按下态（AC-08）
     // ---------- 菜单页 ----------
     if (this.scene === 'menu') {
       if (this.renderer.inRect(x, y, this.renderer.menuPlayBtn)) {
@@ -208,6 +226,10 @@ export default class Main {
       if (this.renderer.inRect(x, y, this.renderer.nextBtn)) {
         this.audio.play('button');
         this.nextLevel();
+      } else if (this.renderer.inRect(x, y, this.renderer.winBackBtn)) {
+        this.audio.play('button');
+        this.winPanel = false;
+        this.scene = 'menu'; // 返回开始菜单（进度保留，与暂停退出一致）
       }
       return;
     }
@@ -398,6 +420,10 @@ export default class Main {
           fromContentBefore,
           toContentBefore,
           onDone: () => {
+            if (res.guardBlocked) {
+              // 回收守卫拦截（PRD-按钮反馈与混合关回收守卫 FR-06）：动画完成后提示，每次触发都提示
+              this.renderer.showToast(`这瓶装不下该色全部 ${this.logic.capOf(to)} 层，暂不收走`);
+            }
             if (res.completedColor >= 0) {
               // 满瓶先打完成标记（满色瓶 + ✓ 徽章停留展示），标记结束后再起飞去货架
               this.audio.play('complete');
@@ -532,6 +558,7 @@ export default class Main {
           pause_resume: {xy: cRect(R.pauseResumeBtn), scenes: ['game'], when: {pause: true}},
           pause_exit: {xy: cRect(R.pauseExitBtn), scenes: ['game'], when: {pause: true}},
           next: {xy: cRect(R.nextBtn), scenes: ['game'], when: {win: true}},
+          win_back: {xy: cRect(R.winBackBtn), scenes: ['game'], when: {win: true}},
           undo: {xy: cCircle(R.undoBtn), scenes: ['game']},
           shuffle: {xy: cCircle(R.shuffleBtn), scenes: ['game']},
           add_bottle: {xy: cCircle(R.addBottleBtn), scenes: ['game']},

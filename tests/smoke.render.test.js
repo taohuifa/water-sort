@@ -60,6 +60,9 @@ globalThis.wx = {
   onTouchEnd: (fn) => {
     globalThis.__te = fn;
   },
+  onTouchCancel: (fn) => {
+    globalThis.__tc = fn;
+  },
   setStorageSync: noop,
   getStorageSync: () => '',
   removeStorageSync: noop,
@@ -633,6 +636,52 @@ check('完整通关流程：走完一关 → 胜利面板 → 下一关', () => 
   assert.strictEqual(logic.moveCount, 0, '新关步数应清零');
 });
 
+check('通关面板双按钮（方案 A）：主按钮「下一关」+ 副按钮「返回」回主菜单', () => {
+  main.loadLevel(0);
+  // DFS 求解（直接用逻辑层 API，聚焦面板交互）
+  const visited = new Set();
+  const key = () => logic.bottles.map((b) => b.join(',')).join('|');
+  const dfs = () => {
+    if (logic.isWin()) return true;
+    const k = key();
+    if (visited.has(k)) return false;
+    visited.add(k);
+    for (let from = 0; from < logic.bottles.length; from++) {
+      for (let to = 0; to < logic.bottles.length; to++) {
+        if (from === to || logic.canPour(from, to) === 0) continue;
+        logic.pour(from, to);
+        if (dfs()) return true;
+        logic.undo();
+      }
+    }
+    return false;
+  };
+  assert.ok(dfs(), '第 1 关应可解');
+  for (let i = 0; i < 120 && !anims.allDone(); i++) anims.update(1 / 60);
+  main.tick();
+  main.winDelay = 0.5;
+  main.tick();
+  assert.ok(main.winPanel, '应弹出胜利面板');
+
+  // 绘制一次：面板应同时含主按钮与副按钮文案
+  globalThis.__fillTexts.length = 0;
+  main.tick();
+  const texts = globalThis.__fillTexts.join('\n');
+  assert.ok(texts.includes('下一关'), '非末关主按钮应为「下一关」');
+  assert.ok(texts.includes('返回'), '副按钮应为「返回」');
+
+  // 点「返回」→ 回主菜单，面板关闭
+  const b = renderer.winBackBtn;
+  tap(b.x + b.w / 2, b.y + b.h / 2);
+  assert.strictEqual(main.scene, 'menu', '点「返回」应回到主菜单');
+  assert.ok(!main.winPanel, '胜利面板应关闭');
+  assert.strictEqual(main.cleared, 1, '返回不清除通关进度');
+
+  // 恢复现场（与前置「完整通关流程」用例结束时一致：levelIndex=1），避免影响后续用例
+  main.scene = 'game';
+  main.loadLevel(1);
+});
+
 check('左上角返回按钮 → 暂停浮层（继续 / 退出）', () => {
   tap(renderer.backBtn.x, renderer.backBtn.y);
   assert.ok(main.pauseOverlay, '应弹出暂停浮层');
@@ -820,6 +869,38 @@ check('满瓶完成徽章链：满色瓶停留 ✓ 徽章 → 徽章结束后才
   }
   assert.ok(sawBadge, '应至少经过一次完成链路');
   assert.ok(logic.isWin(), '按路径重放应通关');
+});
+
+check('R1 按下态生命周期：命中记录 / 抬手清 / 位移超阈值清 / onCancel 清 / onTap 派发零改动（AC-08/AC-09）', () => {
+  main.loadLevel(0);
+  main.scene = 'game';
+  main.tick();
+  // touchstart 命中底栏按钮 → pressed 记录（仅视觉，不派发）
+  globalThis.__ts({ touches: [{ clientX: renderer.undoBtn.x, clientY: renderer.undoBtn.y }] });
+  assert.strictEqual(renderer.pressed, 'undoBtn', 'touchstart 命中应记录按下态');
+  assert.strictEqual(logic.moveCount, 0, '按下本身不触发任何操作');
+  // 位移超阈值 → 清除按下态且不派发
+  globalThis.__tm({ touches: [{ clientX: renderer.undoBtn.x, clientY: renderer.undoBtn.y - 20 }] });
+  assert.strictEqual(renderer.pressed, null, '位移超阈值应清除按下态');
+  globalThis.__te({ changedTouches: [] });
+  assert.strictEqual(logic.moveCount, 0, '拖动不应误触按钮（onTap 派发行为与现状一致）');
+  // start 命中 + end → 正常派发 onTap 且 pressed 清除（无残留）
+  globalThis.__ts({ touches: [{ clientX: renderer.backBtn.x, clientY: renderer.backBtn.y }] });
+  assert.strictEqual(renderer.pressed, 'backBtn', 'backBtn 命中应记录按下态');
+  globalThis.__te({ changedTouches: [] });
+  assert.ok(main.pauseOverlay, 'onTap 应正常派发（弹出暂停浮层）');
+  assert.strictEqual(renderer.pressed, null, '抬手应清除按下态');
+  // 浮层开关：onTap 分支置位 → 入口统一清（无「浮层下残留高亮」）
+  renderer.pressed = 'undoBtn';
+  tap(renderer.pauseResumeBtn.x + 5, renderer.pauseResumeBtn.y + 5);
+  assert.ok(!main.pauseOverlay, '浮层应正常关闭');
+  assert.strictEqual(renderer.pressed, null, 'onTap 入口应清按下态');
+  // touchCancel → 清除
+  globalThis.__ts({ touches: [{ clientX: renderer.undoBtn.x, clientY: renderer.undoBtn.y }] });
+  assert.strictEqual(renderer.pressed, 'undoBtn');
+  globalThis.__tc({ changedTouches: [] });
+  assert.strictEqual(renderer.pressed, null, 'touchCancel 应清除按下态');
+  main.pauseOverlay = false;
 });
 
 console.log(`\n结果: ${failed === 0 ? '全部通过' : failed + ' 项失败'}`);

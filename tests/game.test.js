@@ -1175,11 +1175,19 @@ test('MX-3/AC-4：完成判定 —— cap3 瓶 3 层纯色完成收走；cap5 �
 });
 
 test('MX-4/AC-5：isWin —— 拆色（cap3 提前完成 + 剩层在场）不判胜；正常收齐 + 场上清空判胜', () => {
-  // 拆色：色 0 总量 4 层，3 层进 cap3 瓶完成、剩 1 层在场 → completed=1=colorCount 但不应判胜
+  // 拆色（PRD-按钮反馈与混合关回收守卫 AC-01）：色 0 总量 4，3 层进 cap3 瓶 →
+  // 守卫拦截（该色未全部聚齐），瓶不被回收、内容保留（旧规则的拆色回收死局已消除）
   const split = loadMixFixed([[0, 0, 0], [0], []], [4, 3, 4], { colors: 1 });
-  const res = split.pour(0, 1); // amount = min(run 3, 3-1) = 2 → [0,0,0] cap3 满纯色
-  assert.strictEqual(res.completedColor, 0);
+  const res = split.pour(0, 1); // amount = min(run 3, 3-1) = 2 → [0,0,0] cap3 满纯色但守卫拦截
+  assert.strictEqual(res.amount, 2);
+  assert.strictEqual(res.completedColor, -1, '拆色满纯色不应完成（守卫拦截）');
+  assert.strictEqual(res.guardBlocked, true, '应返回 guardBlocked 标记');
   assert.deepStrictEqual(split.bottles[0], [0], '源瓶应剩 1 层（拆色）');
+  assert.deepStrictEqual(split.bottles[1], [0, 0, 0], '守卫拦截后瓶内容应保留');
+  assert.deepStrictEqual(split.completed, [], 'completed 不应增加');
+  assert.ok(!split.removed.has(1), '瓶不应被收走');
+  // isWin 防假通关防御保留（代码一行不动）：completed 达标 + 场上未清空 → 不判胜
+  split.completed.push(0); // 手工模拟 completed 达标
   assert.ok(split.completed.length >= split.colorCount, 'completed 数已达标（前置）');
   assert.ok(!split.isWin(), '场上剩层未清空 → 不判胜（防假通关）');
 
@@ -1322,6 +1330,68 @@ for (let idx = 0; idx < LEVELS.length; idx++) {
     console.log(`      通关步数 ${moves}，搜索 ${states} 态`);
   });
 }
+
+console.log('== 混合关回收守卫（PRD-按钮反馈与混合关回收守卫 / AC-01~AC-04） ==');
+
+test('AC-01：错误容量满纯色不回收 —— completed 不增、内容保留、removed 不含，且可继续倒出（玩法不断）', () => {
+  // 色 0 总量 5：瓶0 [0,0,0] + 瓶1 [0] + 瓶2 [0]；把 cap3 瓶（瓶1）倒满 3 层纯 0
+  const logic = loadMixFixed([[0, 0, 0], [0], [0], [1, 1], []], [5, 3, 4, 4, 4], { colors: 2 });
+  const res = logic.pour(0, 1); // 顶层 0 三层中倒 2 层 → 瓶1 [0,0,0] cap3 满纯色
+  assert.strictEqual(res.amount, 2);
+  assert.strictEqual(res.completedColor, -1, '错误容量满纯色不应完成回收');
+  assert.strictEqual(res.guardBlocked, true, '应返回 guardBlocked 标记供胶水层 toast');
+  assert.deepStrictEqual(logic.completed, [], 'completed 不应增加');
+  assert.ok(!logic.removed.has(1), '瓶 1 不应被收走');
+  assert.deepStrictEqual(logic.bottles[1], [0, 0, 0], '满纯色瓶内容应保留在场');
+  // 后续仍可从该瓶倒出（瓶留场可继续参与倒水）
+  assert.ok(logic.canPour(1, 4) > 0, '守卫拦截后的满瓶应可作为源倒出');
+  const res2 = logic.pour(1, 4);
+  assert.strictEqual(res2.amount, 3);
+  assert.deepStrictEqual(logic.bottles[1], [], '倒出后瓶腾空');
+});
+
+test('AC-02：正确容量正常回收 —— 色 c 总量 == 瓶容量，倒满后与现状一致（completed+清空+removed）', () => {
+  const logic = loadMixFixed([[0], [0, 0, 0], [1, 1], []], [4, 4, 4, 4], { colors: 2 });
+  const res = logic.pour(0, 1); // 色 0 总量 4 == cap4 → 倒满即完整色
+  assert.strictEqual(res.amount, 1);
+  assert.strictEqual(res.completedColor, 0, '容量匹配的满纯色应正常完成');
+  assert.strictEqual(res.guardBlocked, false, '守卫通过不应置 guardBlocked');
+  assert.deepStrictEqual(logic.completed, [0]);
+  assert.deepStrictEqual(logic.bottles[1], []);
+  assert.ok(logic.removed.has(1));
+});
+
+test('AC-03：求解器镜像守卫 —— 守卫下可解、旧规则（错误容量强制回收）必死的局面，_solvable 应返回 true', () => {
+  // 色构（caps [4,3,3]）：色 0 总量 4（b0 cap4 恰满但未收集），色 1 总量 3（b2 cap3，目标 = b1 cap3）。
+  // 守卫下唯一通关线：b2→b1 收色 1（容量匹配）→ b0 倒 3 层进腾空的 b2（cap3）→ 错误容量满纯色
+  //   （色 0 总量 4 ≠ 3）→ 守卫拦截不回收 → b2 再倒回 b0 → b0 满 4 纯色容量匹配 → 回收 → 全清空 = 通关。
+  // 旧规则：b0→b1 / b0→b2 任一倒法都会把错误容量满瓶强制回收（caps 减 3、totals 留 4）→ 色 0 拆色必死；
+  //   两个缓冲瓶均为 cap3，不存在绕开错误容量分支的路线 → 旧规则 _solvable 恒 false。
+  // 故 _solvable 返回 true 当且仅当完成分支镜像了回收守卫。
+  const bottles = [
+    [0, 0, 0, 0],
+    [],
+    [1, 1, 1],
+  ];
+  const mixCaps = [4, 3, 3];
+  const logic = new GameLogic();
+  logic.colorCount = 2;
+  assert.strictEqual(
+    logic._solvable(bottles, 60000, null, null, null, mixCaps),
+    true,
+    '镜像守卫后求解器应能经「错误容量满瓶暂存→倒回」走通'
+  );
+});
+
+test('AC-04：普通关任意满纯色完成守卫恒真（每色总量=容量），完成回收行为与现状完全一致', () => {
+  const logic = loadFixed([[1, 2], [2, 2, 2], []], 3);
+  const res = logic.pour(0, 1); // 顶层 2 倒入 → [2,2,2,2] 满纯色；普通关每色总量 4 == 容量 4
+  assert.strictEqual(res.completedColor, 2, '普通关完成行为不变');
+  assert.strictEqual(res.guardBlocked, false, '普通关守卫恒真');
+  assert.deepStrictEqual(logic.completed, [2]);
+  assert.ok(logic.removed.has(1));
+  assert.deepStrictEqual(logic.bottles[1], []);
+});
 
 console.log(`\n结果: ${passed} passed, ${failed} failed`);
 console.log(`颜色定义数: ${COLORS.length}，关卡数: ${LEVELS.length}，容量: ${CAPACITY}`);

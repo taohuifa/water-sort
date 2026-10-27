@@ -538,8 +538,13 @@ export default class GameLogic {
         if (bigIdx < 0 && t.length === capAt(m.to)) {
           // 完成判定按真实色与该瓶容量（与游戏 _isFullMono 一致；shuffle 验证时冻结瓶可能含隐藏层）。
           // 特殊关无「完成清空」语义（R4：普通瓶满纯色不收走），整体跳过。
+          // 回收守卫与 pour() 镜像（共用 _colorGathered）：错误容量满瓶不回收、继续参与搜索，
+          // 保证求解器与实际玩法等价（PRD-按钮反馈与混合关回收守卫 FR-05）。
           const c0 = t[0] >= 0 ? t[0] : -t[0] - 1;
-          if (t.every((c) => (c >= 0 ? c : -c - 1) === c0)) {
+          if (
+            t.every((c) => (c >= 0 ? c : -c - 1) === c0) &&
+            this._colorGathered(bs, c0, t.length, done)
+          ) {
             t.length = 0; // 完成清空 + 收走，不再参与后续搜索
             done.add(m.to);
           }
@@ -646,22 +651,29 @@ export default class GameLogic {
     this._revealTop(f); // 倒出后源瓶若露出「?」层则揭示
 
     let completedColor = -1;
+    let guardBlocked = false;
     if (this.special !== 'bigBottle' && this._isFullMono(t, this.capOf(to))) {
-      completedColor = color;
-      this.completed.push(color);
-      t.length = 0;
-      this.removed.add(to); // 完成即连瓶收走上架
-      // 条件锁解锁检查：已完成成品数 ≥ need → 解锁
-      for (let k = 0; k < this.locks.length; k++) {
-        const lk = this.locks[k];
-        if (lk.type === 'cond' && !this.unlocked[k] && this.completed.length >= lk.need) {
-          this.unlocked[k] = true;
+      // 回收守卫：场上该真实色总层数 == 该瓶容量（该色已全部聚齐）才回收；
+      // 混合关错误容量（色总量 > 瓶容量）满瓶不收走——瓶留场可继续倒出，防不可逆死局
+      if (this._colorGathered(this.bottles, color, t.length, this.removed)) {
+        completedColor = color;
+        this.completed.push(color);
+        t.length = 0;
+        this.removed.add(to); // 完成即连瓶收走上架
+        // 条件锁解锁检查：已完成成品数 ≥ need → 解锁
+        for (let k = 0; k < this.locks.length; k++) {
+          const lk = this.locks[k];
+          if (lk.type === 'cond' && !this.unlocked[k] && this.completed.length >= lk.need) {
+            this.unlocked[k] = true;
+          }
         }
+      } else {
+        guardBlocked = true; // 供胶水层 toast「这瓶装不下该色全部 N 层，暂不收走」
       }
     }
     this.undoStack.push(record);
     this.moveCount++;
-    return { amount, color, completedColor };
+    return { amount, color, completedColor, guardBlocked };
   }
 
   /** 撤回上一步（倒水 / 打乱 / 加瓶，按栈序恢复到该步之前的状态） */
@@ -872,6 +884,27 @@ export default class GameLogic {
     if (b.length !== cap) return false;
     const c0 = b[0] >= 0 ? b[0] : -b[0] - 1;
     return b.every((c) => (c >= 0 ? c : -c - 1) === c0);
+  }
+
+  /**
+   * 回收守卫（PRD-按钮反馈与混合关回收守卫 §2.3）：
+   * 场上（排除 excludedSet 中已收走的瓶——它们完成时已清空）真实色 color 的总层数
+   * 是否恰等于 bottleLen——即该色已全部聚齐在指定瓶（瓶层数 == 其容量）时才允许回收。
+   * 消除混合关「错误容量回收」不可逆死局：色总量 > 瓶容量时满瓶不收走，可继续倒出。
+   * 隐藏层负编码（-c-1）按真实色解码统计；pour 用 this.bottles，_solvable 用局部 bs，
+   * 共用本判定防两处漂移。普通关每色总量恒 = capacity → 守卫恒真（零回归）。
+   */
+  _colorGathered(bottles, color, bottleLen, excludedSet) {
+    let total = 0;
+    for (let i = 0; i < bottles.length; i++) {
+      if (excludedSet && excludedSet.has(i)) continue;
+      const b = bottles[i];
+      for (let li = 0; li < b.length; li++) {
+        const c = b[li];
+        if ((c >= 0 ? c : -c - 1) === color) total++;
+      }
+    }
+    return total === bottleLen;
   }
 
   /** 通关：普通/混合关 = 所有颜色完成分装 且 场上无剩余层（防拆色假通关，PRD-混合容量瓶 §2；

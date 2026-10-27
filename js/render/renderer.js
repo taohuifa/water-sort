@@ -23,6 +23,7 @@ export default class Renderer {
     this.caps = null; // 每瓶容量（混合关，setupBoard 注入；null = 均一容量）
     this.levelScroll = 0; // 关卡选择页竖向滚动偏移
     this.levelScrollMax = 0; // 滚动上限（drawLevelSelect 按内容高度计算）
+    this.pressed = null; // 按下态按钮 key（R1，main.js bindTouch 命中检测写入 / 清除；仅视觉反馈）
     this.initSafeArea();
     this.layoutUI();
   }
@@ -138,6 +139,7 @@ export default class Renderer {
     this.addBottleBtn = { x: W / 2 + 38, y: btnY, r: 28 };
     this.restartBtn = { x: W / 2 + 114, y: btnY, r: 28 };
     this.nextBtn = { x: W / 2 - 80, y: this.H / 2 + 42, w: 160, h: 48 };
+    this.winBackBtn = { x: W / 2 - 80, y: this.H / 2 + 42, w: 100, h: 46 }; // 通关面板副按钮「返回」（drawWinPanel 内重定位）
     // 暂停浮层
     this.pauseResumeBtn = { x: W / 2 - 90, y: this.H / 2 - 44, w: 180, h: 48 };
     this.pauseExitBtn = { x: W / 2 - 90, y: this.H / 2 + 24, w: 180, h: 48 };
@@ -329,6 +331,65 @@ export default class Renderer {
     return r && px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
   }
 
+  /**
+   * 触摸按下命中检测（R1）：按场景 / 浮层列出当前可交互按钮，返回按钮 key 或 null。
+   * ctx = {scene, winPanel, bigIntro, adConfirm, pauseOverlay}；分支顺序与 main.js onTap 一致。
+   * 仅用于按下态视觉反馈，不参与 onTap 点击派发（派发逻辑零改动）。
+   */
+  hitButton(px, py, ctx) {
+    const { scene } = ctx;
+    if (scene === 'menu') {
+      if (this.inRect(px, py, this.menuPlayBtn)) return 'menuPlayBtn';
+      if (this.inRect(px, py, this.menuSettingsBtn)) return 'menuSettingsBtn';
+      return null;
+    }
+    if (scene === 'settings') {
+      if (this.inCircle(px, py, this.backBtn)) return 'backBtn';
+      if (this.inRect(px, py, this.settingsSoundToggle)) return 'settingsSoundToggle';
+      if (this.inRect(px, py, this.settingsResetBtn)) return 'settingsResetBtn';
+      if (this.inRect(px, py, this.settingsKeyBtn)) return 'settingsKeyBtn';
+      return null;
+    }
+    if (scene === 'levelSelect') {
+      if (this.inCircle(px, py, this.backBtn)) return 'backBtn';
+      for (let i = 0; i < this.levelBtns.length; i++) {
+        if (this.inRect(px, py, this.levelBtns[i])) return 'level:' + i;
+      }
+      return null;
+    }
+    // game 场景（浮层按 onTap 同序：winPanel → bigIntro → adConfirm → pauseOverlay → 常规）
+    if (ctx.winPanel) {
+      if (this.inRect(px, py, this.nextBtn)) return 'nextBtn';
+      if (this.inRect(px, py, this.winBackBtn)) return 'winBackBtn';
+      return null;
+    }
+    if (ctx.bigIntro) return this.inRect(px, py, this.bigIntroBtn) ? 'bigIntroBtn' : null;
+    if (ctx.adConfirm) {
+      if (this.inRect(px, py, this.adConfirmWatchBtn)) return 'adConfirmWatchBtn';
+      if (this.inRect(px, py, this.adConfirmCancelBtn)) return 'adConfirmCancelBtn';
+      return null;
+    }
+    if (ctx.pauseOverlay) {
+      if (this.inRect(px, py, this.pauseResumeBtn)) return 'pauseResumeBtn';
+      if (this.inRect(px, py, this.pauseExitBtn)) return 'pauseExitBtn';
+      return null;
+    }
+    if (this.inCircle(px, py, this.backBtn)) return 'backBtn';
+    if (this.inCircle(px, py, this.undoBtn)) return 'undoBtn';
+    if (this.inCircle(px, py, this.shuffleBtn)) return 'shuffleBtn';
+    if (this.inCircle(px, py, this.addBottleBtn)) return 'addBottleBtn';
+    if (this.inCircle(px, py, this.restartBtn)) return 'restartBtn';
+    return null;
+  }
+
+  /** 按下态填充加深一档：hex 色乘 0.88（同色系变暗，不新造色板基调）；非 hex 原样返回 */
+  _darken(hex) {
+    const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
+    if (!m) return hex;
+    const d = (h) => Math.round(parseInt(h, 16) * 0.88).toString(16).padStart(2, '0');
+    return `#${d(m[1])}${d(m[2])}${d(m[3])}`;
+  }
+
   // ---------- 主绘制（按场景分发） ----------
 
   draw(state) {
@@ -385,10 +446,20 @@ export default class Renderer {
     ctx.restore();
   }
 
-  /** 通用文字按钮 */
+  /** 通用文字按钮。style.pressed：按下态（中心缩放 0.88 + 填充加深一档，R1，圆形与矩形统一） */
   drawTextButton(btn, label, style) {
     const { ctx } = this;
-    ctx.fillStyle = style.fill;
+    ctx.save();
+    if (style.pressed) {
+      const cx = btn.x + btn.w / 2;
+      const cy = btn.y + btn.h / 2;
+      ctx.translate(cx, cy);
+      ctx.scale(0.88, 0.88);
+      ctx.translate(-cx, -cy);
+    }
+    let fill = style.fill;
+    if (style.pressed) fill = fill.startsWith('#') ? this._darken(fill) : '#FBE3C4';
+    ctx.fillStyle = fill;
     this.rr(btn.x, btn.y, btn.w, btn.h, Math.min(btn.h / 2, 24));
     ctx.fill();
     if (style.stroke) {
@@ -402,23 +473,48 @@ export default class Renderer {
     ctx.textBaseline = 'middle';
     ctx.fillText(label, btn.x + btn.w / 2, btn.y + btn.h / 2 + 1);
     ctx.textBaseline = 'alphabetic';
+    ctx.restore();
   }
 
-  /** 通用圆形小按钮（返回/图标）。opts.icon 提供素材图标键名，缺省画文字 */
+  /**
+   * 通用圆形小按钮（返回/图标）。opts.icon 提供素材图标键名，缺省画文字。
+   * opts.pressed：按下态（中心缩放 0.88 + 填充加深一档，R1）。
+   * opts.active：生效中态（橙色高亮描边 + 呼吸脉冲环 + 微暖填充，R2，二段式道具通用）；
+   * active 与 pressed 可叠加——pressed 缩放与加深作用在 active 样式之上。
+   */
   drawCircleButton(btn, label, opts = {}) {
     const { ctx } = this;
-    ctx.fillStyle = opts.fill || 'rgba(255,255,255,0.92)';
+    ctx.save();
+    if (opts.pressed) {
+      ctx.translate(btn.x, btn.y);
+      ctx.scale(0.88, 0.88);
+      ctx.translate(-btn.x, -btn.y);
+    }
+    if (opts.active) {
+      // 呼吸脉冲环：时间正弦调制外环半径与透明度（周期约 1.2s）
+      const pulse = 0.5 + 0.5 * Math.sin((Date.now() / 1200) * Math.PI * 2);
+      ctx.strokeStyle = `rgba(224, 123, 42, ${(0.3 + 0.45 * pulse).toFixed(3)})`;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(btn.x, btn.y, btn.r + 4 + 3 * pulse, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    let fill = opts.fill || 'rgba(255,255,255,0.92)';
+    if (opts.active) fill = '#FFEFD9'; // 微暖填充（色板既有色）
+    if (opts.pressed) fill = fill.startsWith('#') ? this._darken(fill) : '#FBE3C4'; // 按下加深一档
+    ctx.fillStyle = fill;
     ctx.beginPath();
     ctx.arc(btn.x, btn.y, btn.r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = opts.stroke || '#E8C9A0';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = opts.active ? '#E07B2A' : opts.stroke || '#E8C9A0';
+    ctx.lineWidth = opts.active ? 3 : 2;
     ctx.stroke();
     const icon = opts.icon && this.images[opts.icon];
     if (icon) {
       // 图标占按钮直径的 70%
       const d = btn.r * 1.4;
       ctx.drawImage(icon, btn.x - d / 2, btn.y - d / 2, d, d);
+      ctx.restore();
       return;
     }
     ctx.fillStyle = opts.text || '#8A6234';
@@ -427,6 +523,7 @@ export default class Renderer {
     ctx.textBaseline = 'middle';
     ctx.fillText(label, btn.x, btn.y + 1);
     ctx.textBaseline = 'alphabetic';
+    ctx.restore();
   }
 
   // ---------- 菜单页 ----------
@@ -475,11 +572,13 @@ export default class Renderer {
       fill: '#FF9838',
       text: '#FFFFFF',
       size: 19,
+      pressed: this.pressed === 'menuPlayBtn',
     });
     this.drawTextButton(this.menuSettingsBtn, '设置', {
       fill: 'rgba(255,255,255,0.92)',
       stroke: '#E8C9A0',
       text: '#8A6234',
+      pressed: this.pressed === 'menuSettingsBtn',
     });
 
     ctx.font = 'bold 12px sans-serif';
@@ -491,7 +590,7 @@ export default class Renderer {
 
   drawSettings(state) {
     const { ctx } = this;
-    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack' });
+    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', pressed: this.pressed === 'backBtn' });
     ctx.textAlign = 'center';
     ctx.fillStyle = '#8A5A22';
     ctx.font = 'bold 28px sans-serif';
@@ -502,11 +601,12 @@ export default class Renderer {
     ctx.fillStyle = '#7A5C3E';
     ctx.font = 'bold 17px sans-serif';
     ctx.fillText('游戏音效', this.W / 2 - 110, this.settingsSoundToggle.y + 21);
-    this.drawToggle(this.settingsSoundToggle, state.soundOn !== false);
+    this.drawToggle(this.settingsSoundToggle, state.soundOn !== false, this.pressed === 'settingsSoundToggle');
 
     this.drawTextButton(this.settingsResetBtn, '重置关卡进度', {
       fill: '#E5533D',
       text: '#FFFFFF',
+      pressed: this.pressed === 'settingsResetBtn',
     });
     // 兑换码输入入口（GM 指令，测试验收用）
     this.drawTextButton(this.settingsKeyBtn, '输入兑换码', {
@@ -514,6 +614,7 @@ export default class Renderer {
       stroke: '#E8C9A0',
       text: '#8A6234',
       size: 15,
+      pressed: this.pressed === 'settingsKeyBtn',
     });
     // 底部提示区（页脚）：加深为统一提示色 #8A6234
     ctx.font = 'bold 13px sans-serif';
@@ -523,10 +624,17 @@ export default class Renderer {
     ctx.fillText('清除存档进度，从第 1 关重新开始', this.W / 2, this.H - 74);
   }
 
-  /** iOS 风格开关 */
-  drawToggle(t, on) {
+  /** iOS 风格开关。pressed：按下态（中心缩放 0.88，R1） */
+  drawToggle(t, on, pressed = false) {
     const { ctx } = this;
     ctx.save();
+    if (pressed) {
+      const cx = t.x + t.w / 2;
+      const cy = t.y + t.h / 2;
+      ctx.translate(cx, cy);
+      ctx.scale(0.88, 0.88);
+      ctx.translate(-cx, -cy);
+    }
     // 轨道
     ctx.fillStyle = on ? '#8BD450' : '#D8C9B2';
     this.rr(t.x, t.y, t.w, t.h, t.h / 2);
@@ -544,7 +652,7 @@ export default class Renderer {
 
   drawLevelSelect(state) {
     const { ctx } = this;
-    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack' });
+    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', pressed: this.pressed === 'backBtn' });
     ctx.textAlign = 'center';
     ctx.fillStyle = '#8A5A22';
     ctx.font = 'bold 26px sans-serif';
@@ -582,13 +690,24 @@ export default class Renderer {
 
       const cleared = i < state.cleared; // 已通关
       const unlocked = i <= state.cleared; // 已解锁（含当前待挑战）
+      const cardPressed = this.pressed === 'level:' + i; // 卡片按下态（R1）
 
-      // 卡片
+      // 卡片（按下态：中心缩放 0.88，白底加深一档）
+      ctx.save();
+      if (cardPressed) {
+        const ccx = x + cardW / 2;
+        const ccy = y + cardH / 2;
+        ctx.translate(ccx, ccy);
+        ctx.scale(0.88, 0.88);
+        ctx.translate(-ccx, -ccy);
+      }
       ctx.fillStyle = !unlocked
         ? 'rgba(210,195,170,0.35)'
         : cleared
           ? 'rgba(139,212,80,0.16)'
-          : 'rgba(255,255,255,0.92)';
+          : cardPressed
+            ? '#FBE3C4'
+            : 'rgba(255,255,255,0.92)';
       this.rr(x, y, cardW, cardH, 12);
       ctx.fill();
       ctx.strokeStyle = !unlocked ? 'rgba(176,158,130,0.35)' : cleared ? '#8BD450' : '#E8C9A0';
@@ -619,6 +738,7 @@ export default class Renderer {
         ctx.fillText('挑战', x + cardW - 12, y + cardH / 2);
       }
       ctx.textBaseline = 'alphabetic';
+      ctx.restore(); // 卡片按下态变换收束
     }
 
     // 滚动位置指示（内容超出时可滚动时显示细滚动条）
@@ -662,12 +782,14 @@ export default class Renderer {
       fill: '#FF9838',
       text: '#FFFFFF',
       size: 18,
+      pressed: this.pressed === 'pauseResumeBtn',
     });
     this.drawTextButton(this.pauseExitBtn, '退出 · 返回菜单', {
       fill: 'rgba(255,255,255,0.92)',
       stroke: '#E8C9A0',
       text: '#8A6234',
       size: 16,
+      pressed: this.pressed === 'pauseExitBtn',
     });
     ctx.restore();
   }
@@ -692,12 +814,14 @@ export default class Renderer {
       fill: '#FF9838',
       text: '#FFFFFF',
       size: 17,
+      pressed: this.pressed === 'adConfirmWatchBtn',
     });
     this.drawTextButton(this.adConfirmCancelBtn, '取消', {
       fill: 'rgba(255,255,255,0.92)',
       stroke: '#E8C9A0',
       text: '#8A6234',
       size: 16,
+      pressed: this.pressed === 'adConfirmCancelBtn',
     });
     ctx.restore();
   }
@@ -753,18 +877,16 @@ export default class Renderer {
     ];
     lines.forEach((t, i) => ctx.fillText(t, this.W / 2, cy + 222 + i * 21));
 
-    // 按钮
+    // 按钮（drawTextButton：与手写绘制视觉一致，且统一支持按下态 R1）
     const b = this.bigIntroBtn;
     b.x = (this.W - b.w) / 2;
     b.y = cy + ch - 64;
-    ctx.fillStyle = '#FF9838';
-    this.rr(b.x, b.y, b.w, b.h, 24);
-    ctx.fill();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 18px sans-serif';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('开始挑战', this.W / 2, b.y + b.h / 2 + 1);
-    ctx.textBaseline = 'alphabetic';
+    this.drawTextButton(b, '开始挑战', {
+      fill: '#FF9838',
+      text: '#FFFFFF',
+      size: 18,
+      pressed: this.pressed === 'bigIntroBtn',
+    });
     ctx.restore();
   }
 
@@ -794,7 +916,7 @@ export default class Renderer {
 
   drawTopBar(state) {
     const { ctx } = this;
-    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack' });
+    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', pressed: this.pressed === 'backBtn' });
     ctx.textBaseline = 'middle';
     // 顶栏文字：奶油色填充 + 深棕描边（游戏经典描边字），任何背景上都清晰
     ctx.save();
@@ -1373,7 +1495,17 @@ export default class Renderer {
     for (const [btn, label, enabled, uses, icon] of entries) {
       ctx.save();
       ctx.globalAlpha = enabled ? 1 : 0.35;
-      this.drawCircleButton(btn, label, { icon });
+      this.drawCircleButton(btn, label, {
+        icon,
+        // R2 生效中态：打乱选瓶模式时打乱钮呈现 active（与顶部文字提示双通道）
+        active: btn === this.shuffleBtn && state.shuffleSelecting,
+        // R1 按下态：按 key 匹配
+        pressed:
+          (btn === this.undoBtn && this.pressed === 'undoBtn') ||
+          (btn === this.shuffleBtn && this.pressed === 'shuffleBtn') ||
+          (btn === this.addBottleBtn && this.pressed === 'addBottleBtn') ||
+          (btn === this.restartBtn && this.pressed === 'restartBtn'),
+      });
       // 剩余次数角标
       if (enabled && uses > 0) {
         ctx.fillStyle = '#E5533D';
@@ -1443,18 +1575,28 @@ export default class Renderer {
     ctx.font = 'bold 15px sans-serif';
     ctx.fillStyle = '#7A5C3E';
     ctx.fillText(`本关共 ${state.logic.moveCount} 步`, this.W / 2, cy + 92);
-    // 按钮
+    // 双按钮（方案 A）：左「返回」回主菜单（视觉弱化），右主按钮进下一关 / 末关回第 1 关
+    const back = this.winBackBtn;
+    back.x = cx + 16;
+    back.y = cy + 126;
+    this.drawTextButton(back, '返回', {
+      fill: 'rgba(255,255,255,0.92)',
+      stroke: '#E8C9A0',
+      text: '#8A6234',
+      size: 16,
+      pressed: this.pressed === 'winBackBtn',
+    });
     const b = this.nextBtn;
-    b.x = (this.W - b.w) / 2;
-    b.y = cy + 128;
-    ctx.fillStyle = '#FF9838';
-    this.rr(b.x, b.y, b.w, b.h, 24);
-    ctx.fill();
-    ctx.fillStyle = '#FFFFFF';
-    ctx.font = 'bold 18px sans-serif';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(isLast ? '重新开始' : '下一关', this.W / 2, b.y + b.h / 2 + 1);
-    ctx.textBaseline = 'alphabetic';
+    b.x = cx + 130;
+    b.y = cy + 126;
+    b.w = 140;
+    b.h = 46;
+    this.drawTextButton(b, isLast ? '回到第 1 关' : '下一关', {
+      fill: '#FF9838',
+      text: '#FFFFFF',
+      size: 16,
+      pressed: this.pressed === 'nextBtn',
+    });
     ctx.restore();
   }
 
