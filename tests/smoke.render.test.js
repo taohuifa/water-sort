@@ -903,5 +903,145 @@ check('R1 按下态生命周期：命中记录 / 抬手清 / 位移超阈值清 
   main.pauseOverlay = false;
 });
 
+check('P-02/S-02：hitButton/onTap 命中矩阵 —— 4 场景 × 浮层开关组合，按钮 rect 中心逐一断言 + 抽检 onTap 对应', () => {
+  const pt = (r) => (r.r != null ? { x: r.x, y: r.y } : { x: r.x + r.w / 2, y: r.y + r.h / 2 });
+  const mkCtx = () => ({
+    scene: main.scene,
+    winPanel: !!main.winPanel,
+    bigIntro: !!main.bigIntro,
+    adConfirm: !!main.adConfirm,
+    pauseOverlay: !!main.pauseOverlay,
+    cleared: main.cleared,
+  });
+  const shouldHit = (label, r, key) => {
+    const p = pt(r);
+    assert.strictEqual(
+      renderer.hitButton(p.x, p.y, mkCtx()),
+      key,
+      `${label}：rect 中心 (${Math.round(p.x)},${Math.round(p.y)}) 应命中 ${key}`
+    );
+  };
+  const shouldMiss = (label, r) => {
+    const p = pt(r);
+    assert.strictEqual(
+      renderer.hitButton(p.x, p.y, mkCtx()),
+      null,
+      `${label}：rect 中心 (${Math.round(p.x)},${Math.round(p.y)}) 不应命中任何按钮`
+    );
+  };
+
+  // ---------- menu ----------
+  main.scene = 'menu';
+  main.tick();
+  shouldHit('menu', renderer.menuPlayBtn, 'menuPlayBtn');
+  shouldHit('menu', renderer.menuSettingsBtn, 'menuSettingsBtn');
+
+  // ---------- settings ----------
+  main.scene = 'settings';
+  main.tick();
+  shouldHit('settings', renderer.backBtn, 'backBtn');
+  shouldHit('settings', renderer.settingsSoundToggle, 'settingsSoundToggle');
+  shouldHit('settings', renderer.settingsResetBtn, 'settingsResetBtn');
+  shouldHit('settings', renderer.settingsKeyBtn, 'settingsKeyBtn');
+
+  // ---------- levelSelect（cleared=2：前 3 关解锁，其余锁定） ----------
+  const savedCleared = main.cleared;
+  main.cleared = 2;
+  main.scene = 'levelSelect';
+  main.tick(); // 绘制刷新 levelBtns（含滚动偏移）
+  shouldHit('levelSelect', renderer.backBtn, 'backBtn');
+  shouldHit('levelSelect', renderer.levelBtns[0], 'level:0');
+  shouldHit('levelSelect', renderer.levelBtns[1], 'level:1');
+  shouldHit('levelSelect', renderer.levelBtns[2], 'level:2');
+  shouldMiss('levelSelect（锁定卡）', renderer.levelBtns[3]);
+
+  // ---------- game 常规（无浮层） ----------
+  main.cleared = savedCleared;
+  main.scene = 'game';
+  main.tick();
+  shouldHit('game', renderer.backBtn, 'backBtn');
+  shouldHit('game', renderer.undoBtn, 'undoBtn');
+  shouldHit('game', renderer.shuffleBtn, 'shuffleBtn');
+  shouldHit('game', renderer.addBottleBtn, 'addBottleBtn');
+  shouldHit('game', renderer.restartBtn, 'restartBtn');
+  // bindTouch 消费同一函数：touchstart 记录的 pressed 与 hitButton 返回一致
+  const up = pt(renderer.undoBtn);
+  globalThis.__ts({ touches: [{ clientX: up.x, clientY: up.y }] });
+  assert.strictEqual(renderer.pressed, 'undoBtn', 'pressed 应与 hitButton 命中一致');
+  globalThis.__te({ changedTouches: [] });
+
+  // ---------- game + winPanel（浮层分支优先级：常规按钮全部不可命中） ----------
+  main.winPanel = true;
+  main.tick(); // drawWinPanel 每帧覆写 nextBtn/winBackBtn rect，先绘制再命中
+  shouldHit('game+winPanel', renderer.nextBtn, 'nextBtn');
+  shouldHit('game+winPanel', renderer.winBackBtn, 'winBackBtn');
+  shouldMiss('game+winPanel（backBtn）', renderer.backBtn);
+  shouldMiss('game+winPanel（undoBtn）', renderer.undoBtn);
+  // 注：pauseResumeBtn 布局中心恰落在 winPanel nextBtn 覆写 rect 内（布局物理重叠），
+  // winPanel 分支优先返回 nextBtn 属正确行为，不作为「应 miss」样本
+  main.winPanel = false;
+
+  // ---------- game + bigIntro ----------
+  main.bigIntro = true;
+  main.tick();
+  shouldHit('game+bigIntro', renderer.bigIntroBtn, 'bigIntroBtn');
+  shouldMiss('game+bigIntro（backBtn）', renderer.backBtn);
+  main.bigIntro = false;
+
+  // ---------- game + adConfirm ----------
+  main.adConfirm = 'shuffle';
+  main.tick();
+  shouldHit('game+adConfirm', renderer.adConfirmWatchBtn, 'adConfirmWatchBtn');
+  shouldHit('game+adConfirm', renderer.adConfirmCancelBtn, 'adConfirmCancelBtn');
+  shouldMiss('game+adConfirm（backBtn）', renderer.backBtn);
+  main.adConfirm = null;
+
+  // ---------- game + pauseOverlay ----------
+  main.pauseOverlay = true;
+  main.tick();
+  shouldHit('game+pauseOverlay', renderer.pauseResumeBtn, 'pauseResumeBtn');
+  shouldHit('game+pauseOverlay', renderer.pauseExitBtn, 'pauseExitBtn');
+  shouldMiss('game+pauseOverlay（backBtn）', renderer.backBtn);
+  shouldMiss('game+pauseOverlay（undoBtn）', renderer.undoBtn);
+  main.pauseOverlay = false;
+
+  // ---------- onTap 抽检（key 与实际响应一一对应，复用既有 tap 桩） ----------
+  main.scene = 'menu';
+  const ms = pt(renderer.menuSettingsBtn);
+  tap(ms.x, ms.y);
+  assert.strictEqual(main.scene, 'settings', '抽检：menuSettingsBtn 命中 ↔ onTap 切到设置页');
+  main.scene = 'game';
+  main.pauseOverlay = true;
+  const pr = pt(renderer.pauseResumeBtn);
+  tap(pr.x, pr.y);
+  assert.ok(!main.pauseOverlay, '抽检：pauseResumeBtn 命中 ↔ onTap 关闭暂停浮层');
+  main.adConfirm = 'shuffle';
+  const ac = pt(renderer.adConfirmCancelBtn);
+  tap(ac.x, ac.y);
+  assert.strictEqual(main.adConfirm, null, '抽检：adConfirmCancelBtn 命中 ↔ onTap 关闭广告浮层');
+});
+
+check('P-03/S-04：levelSelect 锁定关卡卡片 —— hitButton 返回 null（无按下态）、按下链路不记录不进关', () => {
+  main.cleared = 2;
+  main.scene = 'levelSelect';
+  main.tick();
+  const c = (r) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 });
+  // 走 bindTouch 真实链路：锁定卡 touchstart 不记录按下态
+  const locked = c(renderer.levelBtns[3]);
+  globalThis.__ts({ touches: [{ clientX: locked.x, clientY: locked.y }] });
+  assert.strictEqual(renderer.pressed, null, '锁定卡不应记录按下态（无「可按不可点」暗示）');
+  globalThis.__te({ changedTouches: [] });
+  // 抬手派发 onTap → selectLevel 对未解锁直接 return，场景不变
+  tap(locked.x, locked.y);
+  assert.strictEqual(main.scene, 'levelSelect', '锁定卡点击不应进关');
+  // 对照组：已解锁卡仍有按下态
+  const unlocked = c(renderer.levelBtns[2]);
+  globalThis.__ts({ touches: [{ clientX: unlocked.x, clientY: unlocked.y }] });
+  assert.strictEqual(renderer.pressed, 'level:2', '已解锁卡应记录按下态');
+  globalThis.__te({ changedTouches: [] });
+  main.cleared = 0; // 恢复现场
+  main.scene = 'game';
+});
+
 console.log(`\n结果: ${failed === 0 ? '全部通过' : failed + ' 项失败'}`);
 process.exit(failed > 0 ? 1 : 0);

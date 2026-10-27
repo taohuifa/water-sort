@@ -146,6 +146,7 @@ export default class Main {
         bigIntro: this.bigIntro,
         adConfirm: this.adConfirm,
         pauseOverlay: this.pauseOverlay,
+        cleared: this.cleared, // 解锁进度：未解锁关卡卡片无按下态（S-04）
       });
     });
     wx.onTouchMove((e) => {

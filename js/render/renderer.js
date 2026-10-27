@@ -138,7 +138,7 @@ export default class Renderer {
     this.shuffleBtn = { x: W / 2 - 38, y: btnY, r: 28 };
     this.addBottleBtn = { x: W / 2 + 38, y: btnY, r: 28 };
     this.restartBtn = { x: W / 2 + 114, y: btnY, r: 28 };
-    this.nextBtn = { x: W / 2 - 80, y: this.H / 2 + 42, w: 160, h: 48 };
+    this.nextBtn = { x: W / 2 - 80, y: this.H / 2 + 42, w: 160, h: 48 }; // 实际尺寸/位置由 drawWinPanel 每帧覆写（140×46，面板内定位）
     this.winBackBtn = { x: W / 2 - 80, y: this.H / 2 + 42, w: 100, h: 46 }; // 通关面板副按钮「返回」（drawWinPanel 内重定位）
     // 暂停浮层
     this.pauseResumeBtn = { x: W / 2 - 90, y: this.H / 2 - 44, w: 180, h: 48 };
@@ -333,8 +333,12 @@ export default class Renderer {
 
   /**
    * 触摸按下命中检测（R1）：按场景 / 浮层列出当前可交互按钮，返回按钮 key 或 null。
-   * ctx = {scene, winPanel, bigIntro, adConfirm, pauseOverlay}；分支顺序与 main.js onTap 一致。
+   * ctx = {scene, winPanel, bigIntro, adConfirm, pauseOverlay, cleared}；
    * 仅用于按下态视觉反馈，不参与 onTap 点击派发（派发逻辑零改动）。
+   *
+   * ⚠️ 同步契约：本函数的分支顺序与命中区域是 main.js onTap 分支的手工镜像——
+   * 修改 onTap（分支顺序 / 新增浮层 / 新增按钮）必须同步修改本函数，
+   * 由 smoke「hitButton/onTap 命中矩阵」用例守护（tests/smoke.render.test.js）。
    */
   hitButton(px, py, ctx) {
     const { scene } = ctx;
@@ -353,7 +357,10 @@ export default class Renderer {
     if (scene === 'levelSelect') {
       if (this.inCircle(px, py, this.backBtn)) return 'backBtn';
       for (let i = 0; i < this.levelBtns.length; i++) {
-        if (this.inRect(px, py, this.levelBtns[i])) return 'level:' + i;
+        // 未解锁卡片（i > cleared，与 main.selectLevel 解锁口径一致）返回 null：无按下态
+        if (this.inRect(px, py, this.levelBtns[i]) && i <= (ctx.cleared ?? 0)) {
+          return 'level:' + i;
+        }
       }
       return null;
     }
