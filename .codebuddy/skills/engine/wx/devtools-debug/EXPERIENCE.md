@@ -1,7 +1,7 @@
 # 踩坑经验总结（EXPERIENCE.md）
 
 > 调试微信开发者工具过程中实测踩过的坑与解法。每次调试有新发现，**按日期追加**到对应章节。
-> 最后更新：2026-10-25
+> 最后更新：2026-10-27
 
 ## 目录
 - [automator 通道（9420）](#automator-通道9420)
@@ -145,6 +145,197 @@ env 设 `ELECTRON_RUN_AS_NODE=1`（Electron 以 as-Node 模式跑 JS）。
   对比截图；单靠静态场景截图哈希相同不能区分"没重编译"和"画面没变"
 - 批量生成素材时，文生图对"细长竖条" subjects 有系统性画细倾向（要求 1:3 实出 1:12）。
   对策：prompt 强调"非常粗壮，宽度占画面宽度 85% 以上"+ 用 1:2 画布，出图后裁边拉伸到目标比例
+
+## 2026-10-27 追加（方案B 定稿：点击工具落地 + 关键坐标系）
+
+### 最终工具（scripts/，IDE 需 --inspect=9229 启动）
+- **`wx-snap.mjs <out.png>`**：游戏画布原生截图（canvas.toDataURL，780x1688，
+  **1px = 0.5 游戏逻辑单位**）。比 MCP 截图可靠：无缩放歧义、无陈旧帧、无双实例混淆。
+  AI 读图按**比例**定位（读图显示尺寸≠实际像素，务必用分数定位）→ ×(390,844) 得游戏坐标
+- **`wx-tap.mjs <gameX> <gameY>`**：CDP 可信触摸注入。支持 `--img <px> <py> <w> <h>`
+  （MCP 截图像素坐标自动换算）与 `--info`（打印几何）。内部动态读 webview 元素位置换算
+- 闭环已验证：menu→设置→返回→关卡选择→进关 全流程精确命中
+
+### 关键坐标系（全部实证）
+- 游戏画布 390x844（canvas CSS rect @0,0，zoom=1，guest innerWidth=390/innerHeight=844）
+- MCP 截图 273x591 = webview 元素显示尺寸，与画布等比 ×0.7（与窗口尺寸无关，画布恒 390x844）
+- CDP Input.dispatchTouchEvent 坐标 = **宿主页面视口**（非 guest！）：game→CDP =
+  elOrigin + game×0.7，elOrigin 动态读取（当前 (72.5,90.5)）。校准实证：CDP(196,466)→DOM touch@(176,536)
+- sendInputEvent(mouse) 坐标 = guest 视口（390x844），但 **runtime 的 mouse→touch 翻译层
+  时开时关**（TS@ 时有时无，疑似 IDE 检查器 touch-mode 开关）→ 不可依赖；
+  CDP touch 走真实触摸管线，稳定 ✓
+
+### 观测通道的坑（重要）
+- **MCP 截图可能是陈旧帧或另一个模拟器实例（s0）的画面**：存在双实例（s0=旧全 IDE 窗口
+  最小化，s1=纯模拟器 lite 窗口），MCP screenshot/console 可能读 s0 → 状态误判。
+  **状态确认一律用 wx-snap（画布原生）或 printwin（窗口真实像素）**
+- MCP console 读的是"项目当前会话"的 console，多实例时埋点日志可能读不到
+- guest 的 `document` 是 gameservice shim：无 hasFocus/getElementById、visibilityState
+  读数不可信、eval 被禁——guest executeJavaScript 写探测代码必须全防御式（裸引用
+  devicePixelRatio 等会 ReferenceError 使整段脚本失败）
+- V8 inspector 坑：evaluate 返回的 Promise 必须 `(globalThis.__p = ...)` 挂全局保活，
+  否则 "Promise was collected"；getAllWebContents 遍历需 isDestroyed() 守卫
+- 模板字面量套模板字面量传正则：源码 `\\/` 两层转义（4 层会炸 "Invalid regex flags"）
+- 一次性诊断脚本已清理；点击/截图工具固化为 wx-tap.mjs / wx-snap.mjs
+
+### 未完全收尾的线索
+- **（2026-10-27 已解，见下一节）**"点卡片/点返回偶发回主菜单"谜团已定案：
+  wx-snap 写 PNG 触发 IDE 重编译重载所致，与点击无关
+
+## 2026-10-27 追加 3（目录约定 + 坐标封装分析）
+
+### 临时脚本目录约定
+- **temp/scripts/** = 一次性诊断/探测脚本（用后即删）；**tools/** = 长期维护的正式工具
+  （仅 solve-report.mjs）。AI 生成临时脚本一律进 temp/scripts，勿污染 tools/
+
+### ⑥ tbtn 语义点击（按钮坐标表，2026-10-27 落地；同日升级协议 v2 自描述）
+- **思路**：按钮 rect 真源在 renderer 实例属性（menuPlayBtn/backBtn/levelBtns/bottleRects
+  等全部现成），`syncDebugState()` 快照带 `btns` 表（签名含 levelScroll 使滚动坐标刷新）
+- **协议 v2（同日抽象，见 ADAPTATION.md）**：btns 条目自描述——对象型
+  `{xy, scenes, when?}`、数组型 `{alias, base, list, scenes}`；when 值 `true`=字段真值、
+  其他=严格相等。**wx.mjs 删除 BTN_SCENES/BTN_OVERLAY 硬编码，语义全部从快照读取**——
+  工具变为跨项目通用，新游戏按 ADAPTATION.md 写 ~30 行 syncDebugState 即接入
+- **tap/tbtn 输出通用化**：CHANGED 判定 = 快照顶层字段全量 diff（除 t/btns），
+  报告变化字段名（如 ✓CHANGED(scene,pause)）——"哪些字段算状态"也由游戏自定义
+- **价值实证**：back=34,60 自动读出（此前人算 34,30 全 miss 的坑不会再犯）；
+  UI 改版/换分辨率坐标自动跟随，工具零维护；AI 跑流程无需读 renderer 布局代码
+- 验证：tbtn play→level 17→back→pause_exit 全链路一次通过；pause=false 时 tbtn pause_exit
+  被 when 条件正确拒绝；menu 下 tbtn back 场景校验拒绝；tbtn bottle 0/1 选中+倒水 ✓
+
+## 2026-10-27 追加 2（三大谜团定案 + 坐标修正）
+
+### ① "莫名回主菜单"根因 = wx-snap 写文件触发 IDE 重载（实锤）
+- **机制**：wx-snap 向项目内 `temp/` 写 PNG → IDE 文件监视把 temp/ 变化当项目变更 →
+  触发小程序重新编译 → guest 页面 reload → `scene` 重置为初始值 `'menu'`
+- **验证手段**：guest 侧 `window.__rlMarker = Date.now()` 重载标记（executeJavaScript 装载，
+  幂等；重载后 marker 消失/变值）。实测：每次 wx-snap 写 PNG 后 1~2 秒内 marker 必变值
+- **全部历史异常 100% 吻合**：e2→e3 / d3→d4 / 单独 back 实验的"tap 后回菜单"都发生在
+  snap 写 PNG 之后；flow-marker 实验（纯 executeJavaScript 零文件写入）marker 全程 alive
+- **操作纪律（关键）**：
+  - 多步流程必须**单脚本连续执行且零文件写入**（参考 temp/final-run.mjs 模式）
+  - snap 只能放在流程**最末尾**做最终验证；中途观测用 executeJavaScript 读内存状态
+  - temp/ 不在 IDE watch 白名单里，写入同样触发重载——诊断脚本写一次就停，
+    写完等 5s 让重载完成再开始操作
+
+### ② back 按钮坐标修正：capCenterY=60，不是 30
+- `renderer.backBtn = { x: 34, y: capCenterY }`，capCenterY 来自
+  `wx.getMenuButtonBoundingClientRect()`（模拟器实测 top=44, h=32 → **中心 y=60**），
+  fallback 30 只是无胶囊环境用——**模拟器里 tap (34,30) 全部 miss（距圆心 30 > r 18）**
+- 历史上"back 点击无反应/直接 menu"一半是这个原因（tap 打到棋盘空白处），一半是重载
+- 正确坐标：**back(34,60)**；读取方法：guest executeJavaScript 调
+  `wx.getMenuButtonBoundingClientRect()`（不需要 debugger attach）
+
+### ③ guest reload 后 CDP Input domain 挂起的处置
+- **症状**：重载后 wx-tap 的 `debugger.sendCommand("Input.dispatchTouchEvent")` 永久挂起
+  （Runtime.evaluate awaitPromise 整体超时），但 Runtime domain 消息正常回流、
+  `executeJavaScript` 完全正常——只有 Input domain 死
+- **诊断阶梯**：主进程 inspector ping(1+1) → directRequire/getAllWebContents →
+  `wc.debugger.isAttached()`（残留 true = 死会话）→ `detach()` 同步可用 →
+  attach 后 `Runtime.enable` 有响应 → Input 仍死
+- **解法（实测有效）**：detach → 重新 attach → `Page.bringToFront` +
+  `Emulation.setFocusEmulationEnabled(true)` → Input 恢复（2ms 响应）
+  （也可能是 IDE 稳定后自愈，两者都做最稳）
+- **预防**：wx-tap 挂起超时后，不要无脑重试——先 detach 残留会话再重试
+
+### ④ 一次触摸只派发一次 onTap（已排除的嫌疑）
+- `bindTouch`：touchstart 记录起点 → touchend 位移<8px 才派发 onTap——无双派发，
+  之前怀疑的"start/end 各触发一次"不成立
+
+### ⑤ storage 桥状态读取（免截图快速分支，2026-10-27 落地）
+- **前提事实**：逻辑层与渲染层分离——`wc.executeJavaScript` 跑渲染层，
+  `GameGlobal.__app`（逻辑层实例）不可见（实测 ggKeys 全是 window 属性）；
+  但 **两层共享 storage**：渲染层 `wx.getStorageSync` 能读到逻辑层
+  `wx.setStorageSync` 写的数据（juicesort_cleared=30 实证）
+- **实现**：`main.js` 的 `syncDebugState()`（tick 末尾调用）——状态签名
+  `[scene,pause,level,sel,win,ad,shuf,cleared]` 变化立即写 `__dbg_state`，
+  稳态 2s 心跳刷时间戳；`wx.mjs state` 读快照并按 age 判活（>5s STALE）
+- **工具**：`wx.mjs` 统一 CLI（state/tap/snap/wait/cap）取代 wx-tap/wx-snap：
+  - `tap --expect <scene>` 点击前校验场景，防误点（教训：pauseExitBtn(195,470)
+    与 menuPlayBtn(195,467) 几乎重叠，场景判断错时点"退出"会变成点"play"）
+  - tap 输出前后状态对比，`wait <scene>` 轮询等待切换——**多数场景免截图**
+  - snap 默认输出系统临时目录（项目内写文件 = 触发重载）
+- 全链路验证：state→tap play(--expect menu)→lv2(--expect levelSelect)→
+  back(34,60)(--expect game)→exit(--expect game) 四步全 ✓CHANGED，零截图
+
+### 全链路最终验证（零写入单脚本，temp/final-run.mjs 模式）
+back(levelSelect)→play→lv2→back(34,60)→**BK:pause toast + 暂停浮层出现**（截图实证）→
+exit(195,470)→主菜单 ✓。pauseExitBtn 中心 (195,470)；menuPlayBtn 中心 (195,467)——
+**场景判断错时 (195,470) 会误点 play**（曾致"退出后竟在选关页"），tap 前务必确认 scene
+- **2026-10-27 复测更新**：加 HUD 埋点（dbgLog 事件流画在画布上）后完整复测
+  menu→选关→进第 2 关 **全流程成功**，事件流 T:menu→OPEN:LS→T:levelSelect→SEL:1→LOAD:1
+  逐条正确。此前两次"卡片点击回菜单"均发生在**选关页长停留（>20s，中间夹着人工读图）之后**——
+  怀疑选关页长时间闲置后模拟器/运行时状态漂移（未定论）。
+  **操作纪律：每步 tap 后立刻 wx-snap 验证，发现场景不符预期时先重走导航再继续，
+  不要对"上一步应该还在的场景"做假设**
+
+## 2026-10-26 追加 3（方案B：CDP 死路 + Node inspector 突破）
+
+### CDP `--remote-debugging-port=9222` — 死路，勿再投入
+- 端口能开（Chrome 138 / Electron 37），`/json/version`、`/json/list`、browser 级
+  `Target.getTargets` 全试过：**只有 1 个 target = UGit app-6.2.0 的空壳启动页**
+  （47 个 DOM 节点，desktop-app-container，无 webview/iframe）
+- 项目窗口（water-sort）与模拟器 webview 都在同一进程但**不在默认 session**——
+  Electron 官方文档限制：remote debugging 只挂默认 session 的页面，partition
+  session 的 webContents 完全不可见
+- `--remote-port 3799`（进程参数里那个）不是 CDP，未监听
+
+### Node inspector `--inspect=9229` — 正确路线（实验中）
+- **启动方式**：`cli.bat quit` 退干净 → `Start-Process 微信开发者工具.exe -ArgumentList "--inspect=9229"`
+  → `http://127.0.0.1:9229/json/list` 拿 ws 地址 → Node 22 原生 WebSocket 直连
+- **主进程代码注入**：`Runtime.evaluate` 执行 JS；`require` 不在全局（CJS 模块作用域），
+  **`directRequire('electron')` 可用**（cli bootstrap 注入的全局），`process.mainModule.require` 也可以
+- **V8 inspector 经典坑**：evaluate 返回的 Promise 若无引用会被 GC → 报
+  "Promise was collected"——必须 `(globalThis.__p = new Promise(...))` 挂全局保活
+- `webContents.getAllWebContents()` 遍历时旧对象可能已销毁（"Object has been destroyed"），
+  必须逐个 try/catch + `isDestroyed()` 守卫；webview guest 无 `isVisible()`
+- **模拟器结构**（多开时按 session 编号取最大）：宿主窗口页（electron-project-lite.html）
+  → `<webview>`「小游戏运行时」（URL `/game/sN/.../gamePage.html`，canvas `myCanvas`
+  390x844 @0,0，zoom=1，**guest CSS 坐标 = 输入坐标，无换算**）
+- **注入验证（探针实证）**：对 guest `sendInputEvent`（mouseMove+mouseDown+mouseUp）→
+  事件到达（trusted=true、坐标零偏移）→ **runtime 自动 mouse→touch（TOUCHSTART 触发）**→
+  游戏真实响应：主菜单→选择关卡→进第 2 关全流程成功（mcp-repro-2.jpg）
+- **宿主层注入无效**：对宿主 webContents sendInputEvent 不会路由进 guest webview，直接对 guest 注入
+- **未解决问题：送达间歇性**——后续复测 4/4 注入被吞（guest 探针 `window.__clicks` 活着但零记录），
+  怀疑窗口焦点丢失（IDE 启动时前台、被 shell 活动顶掉后注入被丢）。
+  验证脚本 `temp/cdp-focus.mjs`（读焦点状态 → win.focus()+wc.focus() → 再注入）已写好未跑
+- 复用点击工具骨架：`temp/cdp-click.mjs`（`node temp/cdp-click.mjs <x> <y>`，画布逻辑坐标）
+- MCP 通道与 --inspect 共存无冲突：服务端口/MCP 工具照常可用
+
+## 2026-10-26 追加 2（tap 根因深挖，app.asar 取证）
+
+- **automation_game_action 完整链路**（app.asar 可直接 latin1 grep，实现已明文）：
+  MCP → IDE `Tool.invokeGameMethod` → `invokeGameInteraction(method)` →
+  `IEnvMessagerService2.invoke(APPSERVICE, GAME_DRIVER_COMMAND)` → 游戏 webview 内
+  driver（inspector_v1/inject.js，AES 加密、key 硬编码在 app.asar）→
+  `document.getElementById("myCanvas")` → `new Touch/TouchEvent` →
+  `canvasProto.dispatchEvent.call(canvas, ev)`（touchstart+touchend）→ **无条件返回 {status:0}**
+- **status 0 语义 = "canvas 找到且 dispatchEvent 调用过"，fire-and-forget，不代表游戏收到**
+- **console 实证**：tap 命令确实到达 driver（`[Driver.game] Driver.game.tap {x:196,y:466}`），
+  坐标换算正确——断点在最后一段：合成 DOM TouchEvent 通常进不了
+  「模拟器→逻辑层 wx.onTouchStart」的真实输入管线；偶发成功（两天各 1 次）说明该链路
+  状态相关（疑似 webview 实例漂移/转发监听状态），不可依赖
+- **9420 automator 端口与 automation_game_action 无关**（tap 期间 netstat 实证零连接）——
+  此前"tap 依赖 automator 通道"的结论有误，corrected：它走 IDE 内部 messager
+- **automation_evaluate 是 driver 的 evaluate 分支，但用户代码跑在沙箱 shim**：
+  无 Touch/TouchEvent/Event 构造器、document.getElementById/querySelector 缺失
+  （querySelectorAll 反而可用）、canvas.ownerDocument.defaultView=undefined、eval 被禁
+  → **沙箱内无法自派发触摸事件，渲染层合成触摸方案彻底死路**
+- 可行替代方向：① 游戏侧调试 RPC（wx.connectSocket 连本机 WS server，直接调用游戏
+  触摸 handler，确定性 100%，改自己代码）② IDE 加 `--remote-debugging-port` 走 CDP
+  `Input.dispatchTouchEvent`（可信输入，走真实管线，不改游戏代码，待验证）
+  ③ 真机 adb input tap
+
+## 2026-10-26 追加（tap 复测）
+
+- 结合 CLI V2 官方文档确认：CLI 本身没有任何模拟器点击/输入命令，`cli auto` 只是开启
+  automator 端口；点击能力只在 automator SDK（MiniProgram/Element tap）和 MCP 的
+  `automation_game_action`（内部同样桥接 automator）
+- `automation_game_action` tap 再次复测（4 次独立点击，image 坐标空间，带截图前后对比）：
+  仅第 1 次生效（主菜单→选择关卡），第 2~4 次全部无效（status 0 但画面不变，同会话
+  连续 3 击均无反应）——与 10-25 "单次假象不可再现"结论一致，**tap 通道确认不可用**，
+  不要再因偶发一次成功而改判
+- PowerShell 下 `wxmcp.mjs call <tool> '<json>'` 的 JSON 引号会被 shell 剥离（单双引号
+  都不行），必须写临时 .mjs 脚本 import wxmcp-lib.mjs 执行
 
 ## 2026-10-25 追加 3（白模板滤色）
 
