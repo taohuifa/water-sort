@@ -19,6 +19,7 @@
     "mcp-smoke": "node tests/mcp-smoke.mjs"
   },
   "devDependencies": {
+    "jpeg-js": "^0.4.4",
     "miniprogram-automator": "^0.13.0",
     "miniprogram-automator-next": "^0.1.1",
     "pngjs": "^7.0.0"

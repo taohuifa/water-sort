@@ -15,7 +15,7 @@ export const BOTTLE_ASPECT = 2.0; // 瓶形高宽比（矮胖奶瓶体态；容�
 const BG_FIT_FRAC = {
   bg: { top: 0.25, bottom: 0.27 }, // 彩旗+吊兰+窗户 / 吧台+饮品机
   bgMenu: { top: 0.32, bottom: 0.38 }, // 遮阳篷+云+太阳 / 水果箱+吧台
-  bgLevels: null, // 整页边框（四周水果链）
+  bgLevels: { top: 0.23, bottom: 0.47 }, // 遮阳篷+彩旗 / 水果箱+吧台（2026-10-29 重做图）
   bgSettings: { top: 0.09, bottom: 0.14 }, // 彩旗 / 底部水果行
 };
 
