@@ -209,7 +209,7 @@ const results = LEVELS.filter((lv) => lv.level >= FROM && lv.level <= TO).map((l
  * 合并态间转移互可实现），首次到达 isWin 的深度即最短步数。
  * 搜索态超上限返回 null（调用方回退用启发式 DFS 步数并在报告标注）。
  */
-function solveParBFS(lv, stateCap = 1500000) {
+export function solveParBFS(lv, stateCap = 1500000) {
   const logic = new GameLogic();
   logic.loadLevel(lv);
   if (logic.isWin()) return 0;

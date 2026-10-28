@@ -49,27 +49,36 @@ test('T-01：铺量配置与 §2.1 公式一致（L96~99 试用 + L31~L100 全�
     [97, { timeLimit: 0, moveLimit: 44 }], // par 29：⌈43.5⌉=44
     [98, { timeLimit: 248, moveLimit: 0 }], // par 31：31×8=248
     [99, { timeLimit: 232, moveLimit: 44 }],
-    // —— 全量铺量（步限：第4章起每章2关；限时：第7章起每章1~2关 + Boss70/90）——
+    // —— 全量铺量（步限：第4章起每章2关；限时：第7章起每章1~2关 + Boss70/90）
+    // —— v2 难度重整（PRD-关卡难度重整 §3/执行记录）：限时首秀 L43、双限过渡 L94、Boss50/60 加压、
+    //    L46/47/57/73/76 步限按重摇后 par 重算、L52 补步限（par 用 levels.json 回填值）
     [34, { timeLimit: 0, moveLimit: 26 }], // par 17：⌈25.5⌉=26
     [36, { timeLimit: 0, moveLimit: 36 }], // par 24
-    [46, { timeLimit: 0, moveLimit: 35 }], // par 23：⌈34.5⌉=35
-    [47, { timeLimit: 0, moveLimit: 32 }], // par 21：⌈31.5⌉=32
-    [57, { timeLimit: 0, moveLimit: 32 }],
+    [43, { timeLimit: 208, moveLimit: 0 }], // v2 限时首秀：par 26 → 26×8=208
+    [46, { timeLimit: 0, moveLimit: 36 }], // v2 seed 重摇后 par 24
+    [47, { timeLimit: 0, moveLimit: 38 }], // v2 seed 重摇后 par 25：⌈37.5⌉=38
+    [48, { timeLimit: 200, moveLimit: 0 }], // v2 锁+时限组合教学（par 24）
+    [50, { timeLimit: 456, moveLimit: 0 }], // v2 Boss⑤ 加压：par 57†（BFS 上界）→ 57×8=456
+    [52, { timeLimit: 0, moveLimit: 36 }], // v2 补步限：par 24
+    [57, { timeLimit: 0, moveLimit: 41 }], // v2 seed 重摇后 par 27：⌈40.5⌉=41
     [58, { timeLimit: 0, moveLimit: 33 }], // par 22
+    [60, { timeLimit: 320, moveLimit: 0 }], // v2 Boss⑥ 大瓶10层重摇：par 40† → max(90, ⌈40×8⌉)=320
     [62, { timeLimit: 0, moveLimit: 42 }], // par 28
     [63, { timeLimit: 256, moveLimit: 0 }], // par 32：32×8=256
     [65, { timeLimit: 0, moveLimit: 41 }], // par 27：⌈40.5⌉=41
     [66, { timeLimit: 264, moveLimit: 0 }], // par 33
     [70, { timeLimit: 360, moveLimit: 0 }], // Boss⑦：45×8
-    [73, { timeLimit: 0, moveLimit: 30 }], // par 20
+    [73, { timeLimit: 0, moveLimit: 36 }], // v2 seed 重摇后 par 24
     [74, { timeLimit: 192, moveLimit: 0 }], // par 24
-    [76, { timeLimit: 0, moveLimit: 32 }],
+    [75, { timeLimit: 200, moveLimit: 0 }], // v2 时限配无空瓶锁关（par 24）
+    [76, { timeLimit: 0, moveLimit: 39 }], // v2 seed 重摇后 par 26
     [77, { timeLimit: 184, moveLimit: 0 }], // par 23
     [82, { timeLimit: 0, moveLimit: 30 }],
     [86, { timeLimit: 232, moveLimit: 0 }], // par 29
     [87, { timeLimit: 0, moveLimit: 39 }], // par 26：⌈39⌉=39
     [88, { timeLimit: 248, moveLimit: 0 }], // par 31
     [90, { timeLimit: 416, moveLimit: 0 }], // Boss⑨：52×8
+    [94, { timeLimit: 240, moveLimit: 0 }], // v2 双限过渡关：par 30 → 30×8=240
   ]);
   for (let i = 0; i < LEVELS.length; i++) {
     const no = i + 1;
@@ -426,6 +435,7 @@ test('G-06：重开本关 —— timeLeft/moveLimit 满值重置、失败态清�
   logic.moveCount = logic.moveLimit;
   popFailPanel();
   tapBtn(renderer.failRestartBtn);
+  while (main.scene === 'loading') main.stepLoading(); // 重开走 loading 分帧生成（PRD-关卡生成异步化）
   assert.ok(!main.failPanel, '重开后失败弹窗应关闭');
   assert.strictEqual(logic.moveCount, 0, '重开后步数清零');
   assert.strictEqual(logic.timeLeft, 264, '重开后倒计时满值重置');

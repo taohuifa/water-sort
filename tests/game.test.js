@@ -113,20 +113,20 @@ const CHAPTER_TABLE = [
   [8, 1, 4, 5, 0, 2, 0, false, 0, 0, null, false], [8, 1, 4, 5, 0, 2, 0, false, 1, 0, null, false],
   [8, 1, 3, 5, 0, 2, 0, false, 0, 0, null, false], [8, 1, 3, 5, 0, 2, 0, false, 1, 0, null, false],
   [8, 1, 4, 5, 1, 2, 0, false, 0, 0, null, false], [8, 1, 4, 5, 0, 2, 1, false, 0, 0, null, false],
-  [8, 1, 5, 5, 0, 2, 0, false, 0, 0, null, false], [8, 1, 5, 5, 0, 2, 0, false, 1, 0, null, false],
-  [8, 1, 5, 5, 1, 2, 0, false, 0, 0, null, false], [7, 2, 5, 0, 0, 2, 0, false, 0, 0, 9, false],
+  [8, 1, 5, 5, 0, 2, 0, false, 0, 1, null, false], [8, 1, 5, 5, 0, 2, 0, false, 1, 0, null, false],
+  [8, 1, 5, 5, 1, 2, 0, false, 0, 1, null, false], [7, 2, 5, 0, 0, 2, 0, false, 0, 0, 9, false],
   // 第5章 41~50：锁之章（cond2 need2→3 / key2 爬坡）
   [8, 1, 4, 5, 2, 2, 0, false, 0, 0, null, false], [8, 1, 4, 5, 2, 2, 0, false, 1, 0, null, false],
   [8, 1, 4, 5, 2, 3, 0, false, 0, 0, null, false], [8, 1, 4, 5, 2, 3, 0, false, 1, 0, null, false],
-  [8, 1, 4, 5, 0, 2, 2, false, 0, 0, null, false], [8, 1, 4, 5, 0, 2, 2, false, 1, 0, null, false],
+  [8, 1, 4, 5, 0, 2, 2, false, 0, 1, null, false], [8, 1, 4, 5, 0, 2, 2, false, 1, 0, null, false],
   [8, 1, 4, 5, 1, 3, 1, false, 1, 0, null, false], [8, 1, 4, 5, 2, 3, 1, false, 0, 0, null, false],
   [8, 1, 4, 5, 1, 3, 2, false, 0, 0, null, false], [7, 2, 5, 0, 0, 2, 0, false, 0, 0, 10, false],
   // 第6章 51~60：无空瓶章（隔关出现、与锁/隐藏组合）
   [8, 0, 4, 5, 0, 2, 0, true, 0, 0, null, false], [8, 1, 4, 5, 1, 2, 0, false, 0, 0, null, false],
-  [8, 0, 4, 5, 1, 2, 0, true, 0, 0, null, false], [8, 0, 4, 5, 0, 2, 1, true, 0, 0, null, false],
+  [8, 0, 4, 5, 1, 2, 0, true, 0, 0, null, false], [8, 0, 4, 5, 0, 2, 1, true, 0, 1, null, false],
   [8, 1, 4, 5, 0, 2, 1, false, 1, 0, null, false], [8, 0, 4, 5, 2, 2, 0, true, 0, 0, null, false],
   [8, 0, 4, 4, 0, 2, 0, true, 2, 0, null, false], [8, 0, 4, 5, 1, 3, 1, true, 0, 0, null, false],
-  [8, 0, 4, 4, 1, 3, 1, true, 1, 0, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 9, false],
+  [8, 0, 4, 4, 1, 3, 1, true, 1, 0, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 10, false],
   // 第7章 61~70：容量章（cap5 全章 + 8 色 + 隐藏 5 + empties 1）
   [8, 1, 5, 5, 0, 2, 0, false, 0, 0, null, false], [8, 1, 5, 5, 0, 2, 0, false, 1, 0, null, false],
   [8, 1, 5, 5, 1, 2, 0, false, 0, 0, null, false], [8, 1, 5, 5, 0, 2, 1, false, 0, 0, null, false],
@@ -134,11 +134,11 @@ const CHAPTER_TABLE = [
   [8, 1, 5, 5, 0, 2, 0, false, 0, 1, null, false], [8, 1, 5, 5, 1, 2, 0, false, 0, 1, null, false],
   [8, 1, 5, 5, 0, 2, 1, false, 0, 1, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 10, false],
   // 第8章 71~80：组合章（双锁 + 无空瓶 + cover 轮换）
-  [8, 0, 4, 5, 1, 2, 1, true, 0, 0, null, false], [8, 1, 4, 5, 2, 2, 0, false, 1, 0, null, false],
+  [8, 0, 4, 5, 1, 2, 1, true, 0, 0, null, false], [8, 1, 4, 5, 2, 2, 0, false, 1, 1, null, false],
   [8, 0, 4, 5, 2, 2, 0, true, 0, 0, null, false], [8, 1, 4, 5, 0, 2, 2, false, 1, 0, null, false],
   [8, 0, 4, 4, 1, 3, 1, true, 0, 0, null, false], [8, 1, 4, 5, 1, 3, 1, false, 1, 0, null, false],
   [8, 0, 4, 5, 0, 2, 2, true, 1, 0, null, false], [8, 1, 4, 4, 2, 3, 0, false, 1, 0, null, false],
-  [8, 0, 4, 4, 1, 3, 1, true, 1, 0, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 11, false],
+  [8, 0, 4, 4, 1, 3, 1, true, 1, 1, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 11, false],
   // 第9章 81~90：极限章（三重叠加 + cap5/mix 轮换）
   [8, 1, 5, 5, 1, 2, 1, false, 0, 0, null, false], [8, 1, 4, 5, 2, 2, 0, false, 1, 0, null, false],
   [8, 1, 5, 5, 1, 3, 1, false, 1, 0, null, false], [6, 2, 4, 0, 0, 2, 0, false, 0, 0, null, true],
@@ -148,9 +148,9 @@ const CHAPTER_TABLE = [
   // 第10章 91~100：终章（高难配方 + 炸弹引入）
   [8, 1, 5, 4, 1, 3, 1, false, 0, 1, null, false], [8, 1, 5, 5, 0, 2, 0, false, 0, 2, null, false],
   [8, 1, 5, 4, 2, 3, 0, false, 0, 1, null, false], [8, 1, 5, 5, 1, 3, 1, false, 1, 0, null, false],
-  [8, 1, 5, 4, 1, 3, 0, false, 0, 2, null, false], [8, 1, 5, 4, 1, 3, 1, false, 1, 1, null, false],
-  [8, 1, 5, 5, 0, 2, 2, false, 0, 1, null, false], [8, 1, 5, 3, 1, 3, 1, false, 0, 2, null, false],
-  [8, 1, 5, 3, 1, 3, 1, false, 1, 2, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 8, false],
+  [8, 1, 5, 4, 1, 3, 0, false, 0, 2, null, false], [8, 1, 5, 4, 1, 3, 1, false, 0, 1, null, false],
+  [8, 1, 5, 5, 0, 2, 1, false, 0, 1, null, false], [8, 1, 5, 3, 1, 3, 1, false, 0, 2, null, false],
+  [8, 1, 5, 3, 1, 3, 1, false, 0, 2, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 8, false],
 ];
 
 test('AC-01：L31~L100 章节配置总表逐项一致（全机制铺量，seed 全量固化）', () => {
@@ -323,14 +323,14 @@ test('同 seed 两次生成局面完全一致（可复现，含锁与钥匙位�
   assert.deepStrictEqual(a.locks, b.locks);
 });
 
-test('AC-02/D-10：全部 30 关生成通过求解器验证（含锁瓶/无空瓶开局），单关耗时预算内（Q8=B 5s）', () => {
+test('AC-02/D-10：全部关卡生成通过求解器验证（含锁瓶/无空瓶开局），单关耗时预算内（PRD-关卡生成异步化 Q4：3s）', () => {
   for (let i = 0; i < LEVELS.length; i++) {
     const logic = new GameLogic();
     const t0 = Date.now();
     logic.loadLevel(LEVELS[i]);
     const ms = Date.now() - t0;
     assert.ok(logic.lastGenSolvable, `第 ${i + 1} 关生成未通过求解器验证`);
-    assert.ok(ms < 5000, `第 ${i + 1} 关生成耗时 ${ms}ms 超预算`);
+    assert.ok(ms < 3000, `第 ${i + 1} 关生成耗时 ${ms}ms 超预算（GEN_TOTAL_BUDGET_MS）`);
     if (ms > 200) console.log(`      第 ${i + 1} 关生成耗时 ${ms}ms`);
   }
 });
@@ -940,7 +940,7 @@ test('AC-01：10 个 Boss 特殊关 schema —— special/bigCapacity 透传，�
     { colors: 6, capacity: 5, bigCapacity: 8, empties: 2 },
     { colors: 7, capacity: 5, bigCapacity: 9, empties: 2 }, // Boss④~⑩（PRD-100关扩充 §3 递进）
     { colors: 7, capacity: 5, bigCapacity: 10, empties: 2 },
-    { colors: 8, capacity: 5, bigCapacity: 9, empties: 2 },
+    { colors: 8, capacity: 5, bigCapacity: 10, empties: 2 }, // Boss⑥ L60：v2 大瓶 9→10 + seed 47674 重摇（par 40†）
     { colors: 8, capacity: 5, bigCapacity: 10, empties: 2 },
     { colors: 8, capacity: 5, bigCapacity: 11, empties: 2 },
     { colors: 8, capacity: 5, bigCapacity: 12, empties: 2 },

@@ -86,6 +86,7 @@ node tools/solve-report.mjs --from 71 --to 80   # 区间模式：只跑第 71~80
 | 改动内容 | 该跑 |
 |---|---|
 | `js/core/game.js` 生成/倒液/撤销/可解性 | `npm run test:game` |
+| `js/core/game.js` 生成状态机（beginGenerate/stepGenerate）或 `GEN_TOTAL_BUDGET_MS` 预算 | `npm run test:game` + `npm run test:gen` |
 | `js/core/game.js` 遮盖 / 炸弹 / 限时步限（局部规则） | 对应 `test:cover` / `test:bomb` / `test:timelimit` |
 | `js/core/inventory.js`、道具账本 / 首入 / 重置（main.js） | `npm run test:inventory` |
 | `js/core/stars.js`、三星结算、par 回填 | `npm run test:stars` |

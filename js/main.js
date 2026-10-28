@@ -17,6 +17,9 @@ const BEST_KEY = 'juicesort_best'; // 每关最佳纪录（{[关卡号]: {bestMo
 // 加载时由 parseJsonc 剥离注释
 const LEVEL_CONFIG_PATH = 'assets/config/levels.json'; // 关卡难度曲线配置
 const ADS_CONFIG_PATH = 'assets/config/ads.json'; // 广告位配置
+// 载入分帧预算（PRD-关卡生成异步化与加载界面 F-03）：每帧喂给 stepGenerate 的毫秒数
+// （60fps 帧预算 16.7ms 的一半，留余量给渲染；单次 attempt 原子执行可瞬时超出，PRD 已知取舍）
+const LOAD_SLICE_MS = 6;
 
 // 运行环境判定：正式版 = release；开发者工具/体验版/Node 冒烟桩读不到 → 非 release
 // （容错与调试能力只在非正式版保留，兑换码后门同理）
@@ -129,12 +132,15 @@ export default class Main {
   /** 关卡选择页 → 进入指定关卡（前一关通关才解锁） */
   selectLevel(idx) {
     if (idx < 0 || idx >= LEVEL_COUNT || idx > this.cleared) return; // 未解锁
-    this.scene = 'game';
-    this.pauseOverlay = false;
-    this.loadLevel(idx);
+    this.beginLevelLoad(idx);
   }
 
-  loadLevel(idx) {
+  /**
+   * 统一载入入口（PRD-关卡生成异步化与加载界面 F-03）：记录待载关 → loading 场景分帧生成。
+   * selectLevel / nextLevel / 重开 / 复活重开全部走这里；对局态先清零（加载页不带旧局残影）。
+   */
+  beginLevelLoad(idx) {
+    this.pendingLevel = idx;
     this.levelIndex = idx;
     this.selected = -1;
     this.winPanel = false;
@@ -145,12 +151,32 @@ export default class Main {
     this.failLatch = false;
     this.shuffleSelecting = false;
     this.winStats = null; // 新局清空上一局结算态（PRD-三星评价）
-    this.logic.loadLevel(LEVELS[idx]);
-    this._grantFirstEntry(idx); // 首入赠送（解锁后第一次进入，防重复发放）
-    this.refreshBoard(); // 容量/大瓶参数化布局
-    this.renderer.displayedCompleted = 0;
-    // 特殊关首进引导（本机已读不再弹，重置进度后恢复，R8/AC-12）
-    this.bigIntro = !!LEVELS[idx].special && !this.bigIntroShown;
+    this.scene = 'loading';
+    this.pauseOverlay = false;
+    this._loadPainted = false; // 首帧只画不推进：保证每关至少渲染一帧加载页（用户拍板：所有关卡都渲染）
+    this.logic.beginGenerate(LEVELS[idx]);
+  }
+
+  /** 帧驱动：推进生成预算片；完成即收尾（首入赠送 / 布局 / 特殊关引导）切 game。返回进度 {done, attempts, elapsedMs} */
+  stepLoading() {
+    const r = this.logic.stepGenerate(LOAD_SLICE_MS);
+    if (r.done) {
+      const idx = this.pendingLevel;
+      this._grantFirstEntry(idx); // 首入赠送（解锁后第一次进入，防重复发放）
+      this.refreshBoard(); // 容量/大瓶参数化布局
+      this.renderer.displayedCompleted = 0;
+      // 特殊关首进引导（本机已读不再弹，重置进度后恢复，R8/AC-12）
+      this.bigIntro = !!LEVELS[idx].special && !this.bigIntroShown;
+      this.scene = 'game';
+    }
+    return r;
+  }
+
+  /** 同步载入（测试/外部工具用）：一次跑满生成再收尾，行为与旧 loadLevel 完全一致 */
+  loadLevel(idx) {
+    this.beginLevelLoad(idx);
+    while (!this.logic.stepGenerate(Infinity).done);
+    this.stepLoading(); // done 必真，仅触发收尾切 game
   }
 
   // ---------- 道具背包（PRD-道具背包，账本与持久化归胶水层，core 只管局面） ----------
@@ -237,7 +263,7 @@ export default class Main {
   }
 
   nextLevel() {
-    this.loadLevel((this.levelIndex + 1) % LEVEL_COUNT);
+    this.beginLevelLoad((this.levelIndex + 1) % LEVEL_COUNT);
   }
 
   // ---------- 触摸交互 ----------
@@ -293,6 +319,8 @@ export default class Main {
 
   onTap(x, y) {
     this.renderer.pressed = null; // 场景切换 / 浮层开关均由 onTap 分支置位，入口统一清按下态（AC-08）
+    // loading 场景吞掉一切点击（PRD 拍板 Q3：无返回/取消，生成期间不接受交互）
+    if (this.scene === 'loading') return;
     // ---------- 菜单页 ----------
     if (this.scene === 'menu') {
       if (this.renderer.inRect(x, y, this.renderer.menuPlayBtn)) {
@@ -377,7 +405,7 @@ export default class Main {
     if (this.failPanel) {
       if (this.renderer.inRect(x, y, this.renderer.failRestartBtn)) {
         this.audio.play('button');
-        this.loadLevel(this.levelIndex); // 重开：bombs/timers/timeLeft/moveLimit 随关卡重建
+        this.beginLevelLoad(this.levelIndex); // 重开：bombs/timers/timeLeft/moveLimit 随关卡重建
       } else if (this.renderer.inRect(x, y, this.renderer.failReviveBtn)) {
         this.audio.play('button');
         // 统一续杯语义：库存 > 0 消耗 1 个复活；库存 0 → 广告确认浮层（补 1 后自动使用）
@@ -459,7 +487,7 @@ export default class Main {
     }
     if (this.renderer.inCircle(x, y, this.renderer.restartBtn)) {
       this.audio.play('button');
-      this.loadLevel(this.levelIndex);
+      this.beginLevelLoad(this.levelIndex);
       return;
     }
 
@@ -765,12 +793,17 @@ export default class Main {
     const timeLeft = Math.max(0, Math.round(this.logic.timeLeft));
     const moveLimit = this.logic.moveLimit;
     const failReason = this.logic.failReason || '';
+    // 生成进度（PRD-关卡生成异步化 F-05）：loading 场景观测用；签名只含 attempts（attempt 间即写），
+    // elapsedMs 变化太频不入签名（依赖 attempts 变化或 2s 心跳捎带刷新）
+    const gp = this.scene === 'loading' ? this.logic.genProgress() : null;
+    const genAttempts = gp ? gp.attempts : 0;
+    const genElapsedMs = gp ? Math.round(gp.elapsedMs) : 0;
     const sig = [this.scene, this.pauseOverlay, this.levelIndex, this.selected,
       this.winPanel, this.adConfirm, this.shuffleSelecting, this.cleared,
       this.bigIntro, R.levelScroll,
       this.inv.undo, this.inv.shuffle, this.inv.addBottle, this.inv.revive,
       moves, par, stars, covers.join(','), completedCount,
-      bombs.join(','), fail, timeLeft, moveLimit, failReason].join('|');
+      bombs.join(','), fail, timeLeft, moveLimit, failReason, genAttempts].join('|');
     const now = Date.now();
     if (sig === this._dbgSig && now - this._dbgTs < 2000) return;
     this._dbgSig = sig;
@@ -786,6 +819,7 @@ export default class Main {
         timeLeft, moveLimit, failReason, // 限时/步限：剩余秒（整数）/ 上限（0=无限）/ 失败原因（''=未失败）
         covers, completedCount, // 遮盖瓶：各瓶剩余遮盖层数摘要（0=无遮盖或已揭示）/ 解封计数器
         bombs, fail, // 炸弹瓶：各瓶剩余引信摘要（0=无炸弹或已拆除）/ 失败弹窗态
+        genAttempts, genElapsedMs, // 生成进度（loading 场景观测；非 loading 为 0/0）
         btns: {
           play: {xy: cRect(R.menuPlayBtn), scenes: ['menu']},
           settings: {xy: cRect(R.menuSettingsBtn), scenes: ['menu']},
@@ -820,6 +854,14 @@ export default class Main {
     this.lastTs = now;
 
     this.anims.update(dt);
+
+    // 载入推进（PRD-关卡生成异步化与加载界面 F-03）：loading 场景每帧喂生成预算片，
+    // 完成后 stepLoading 内部收尾切 game（本帧即画对局首帧）。
+    // 首帧例外：只画不推进 —— 否则快关同帧完成生成、加载页一帧都渲染不出（用户拍板：所有关卡都渲染 loading）
+    if (this.scene === 'loading') {
+      if (this._loadPainted) this.stepLoading();
+      else this._loadPainted = true;
+    }
 
     // 限时推进（PRD-限时与步数限制 F-05）：任一浮层打开时停喂即暂停（win/fail/pause/ad/bigIntro），
     // core 零感知暂停态；失败/胜利面板弹出后同样停喂，重开 loadLevel 重置满值
@@ -909,6 +951,9 @@ export default class Main {
       stuck: this.scene === 'game' && !this.logic.isFailed() && !this.logic.hasAnyMove(),
       bigIntro: this.bigIntro,
       specials: SPECIAL_FLAGS,
+      // 生成进度（F-04 加载页进度条用；非 loading 场景为 0/0）
+      genElapsedMs: this.scene === 'loading' && this.logic.genProgress() ? this.logic.genProgress().elapsedMs : 0,
+      genBudgetMs: this.scene === 'loading' && this.logic.genProgress() ? this.logic.genProgress().budgetMs : 0,
     });
 
     if (this.debugBridge) this.syncDebugState();

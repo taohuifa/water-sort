@@ -155,6 +155,13 @@ const { default: Main } = await import('../js/main.js');
 const main = new Main();
 const { logic, renderer } = main;
 
+/** 驱动 loading 场景至进局（PRD-关卡生成异步化：进关分帧生成，测试一次性喂满） */
+function finishLoading() {
+  let n = 0;
+  while (main.scene === 'loading' && n++ < 100000) main.stepLoading();
+  assert.strictEqual(main.scene, 'game', 'loading 应在有限步内完成');
+}
+
 const center = (r) => ({ x: r.x + (r.w || 0) / 2, y: r.y + (r.h || 0) / 2 });
 const tap = (x, y) => {
   globalThis.__ts({ touches: [{ clientX: x, clientY: y }] });
@@ -171,6 +178,7 @@ test('T-04：首入发放 —— 首入 L1 发放并持久化 granted / inventor
   main.tick();
   const p = center(renderer.levelBtns[0]);
   tap(p.x, p.y);
+  finishLoading(); // 进关走 loading 分帧生成（PRD-关卡生成异步化）
   assert.strictEqual(main.scene, 'game');
   assert.deepStrictEqual(main.inv, { undo: 3, shuffle: 2, addBottle: 2, revive: 1 }, 'L1 首入应 shuffle/addBottle 各 +1');
   assert.strictEqual(store.get('juicesort_granted')[1], true, '应持久化发放标记');

@@ -69,10 +69,18 @@ const { default: Main } = await import('../js/main.js');
 const main = new Main();
 const { logic, renderer } = main;
 
+/** 驱动 loading 场景至进局（PRD-关卡生成异步化：selectLevel 分帧生成，测试一次性喂满） */
+function finishLoading(m) {
+  let n = 0;
+  while (m.scene === 'loading' && n++ < 100000) m.stepLoading();
+  assert.strictEqual(m.scene, 'game', 'loading 应在有限步内完成');
+}
+
 test('P-01：老存档 cleared=30 → L31 解锁、L32 锁定，关卡总数 100', () => {
   assert.strictEqual(main.cleared, 30);
   assert.strictEqual(renderer.levelCount, 100, '关卡总数应为 100');
   main.selectLevel(30);
+  finishLoading(main); // 分帧生成喂满 → 切 game
   assert.strictEqual(main.scene, 'game', 'L31 应可挑战');
   assert.strictEqual(main.levelIndex, 30);
   assert.strictEqual(main.scene, 'game');
@@ -161,6 +169,7 @@ test('P-04：通关 L31 后 L32 解锁（解锁链路对 >30 关号正常）', (
   main.scene = 'levelSelect';
   main.tick();
   main.selectLevel(31);
+  finishLoading(main); // 分帧生成喂满 → 切 game
   assert.strictEqual(main.scene, 'game');
   assert.strictEqual(main.levelIndex, 31, 'L32 应可进入');
   assert.ok(!logic.isFailed(), 'L32 载入正常（炸弹关为自动口径，未配置则无失败态）');

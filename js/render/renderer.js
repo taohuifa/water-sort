@@ -72,6 +72,9 @@ export default class Renderer {
     load('iconShuffle', 'assets/images/icon-shuffle.png');
     load('iconAdd', 'assets/images/icon-add.png');
     load('iconRestart', 'assets/images/icon-restart.png');
+    // 加载进度条（PRD-关卡生成异步化与加载界面 F-04）：位图外框 + 果汁填充（源裁剪显示进度）
+    load('loadingBarFrame', 'assets/images/loading-bar.png');
+    load('loadingBarFill', 'assets/images/loading-fill.png');
     // 液体模板（8 色 + 隐藏灰紫）：位图三段拼接（顶盖/主体/底盖），规范见 art-rendering.md；
     // 9 色由白模 liquid-src/liquid-tpl-white.png 离线滤色生成（tools/process-liquid-ai.ps1）
     for (let c = 0; c < 8; c++) {
@@ -421,10 +424,60 @@ export default class Renderer {
       this.drawSettings(state);
     } else if (state.scene === 'levelSelect') {
       this.drawLevelSelect(state);
+    } else if (state.scene === 'loading') {
+      this.drawLoading(state);
     } else {
       this.drawGame(state);
     }
     this.drawToast();
+  }
+
+  /**
+   * 加载页（PRD-关卡生成异步化与加载界面 F-04）：位图进度条（美术素材，遵守美术禁令——
+   * 果汁填充按进度 drawImage 源裁剪，非程序化绘图）+ 关卡号文本辅助。
+   * 进度口径 = 生成耗时 / 总预算（封顶 95%，兜底瞬间不出满条）。
+   */
+  drawLoading(state) {
+    const { ctx } = this;
+    const cx = this.W / 2;
+    const cy = this.H * 0.46;
+    const frame = this.images.loadingBarFrame;
+    const fill = this.images.loadingBarFill;
+    // 条高按外框素材等比（框变形会毁手绘细节）；素材未就绪降级 26px
+    const barW = Math.min(360, this.W * 0.72);
+    const barH = frame ? (barW * frame.height) / frame.width : 26;
+    const bx = cx - barW / 2;
+    const by = cy - barH / 2;
+    const budget = state.genBudgetMs || 1;
+    const p = Math.max(0.04, Math.min(0.95, (state.genElapsedMs || 0) / budget));
+    if (fill) {
+      // 果汁填充：按进度裁源宽（填充先画、外框后画套住，与液体/玻璃同层级口径）。
+      // 嵌入玻璃槽：框素材剖面实测 —— 内槽纵向 50%~79% 框高、左右边框各约 8% 框宽
+      const fx = bx + barW * 0.085;
+      const fw = barW * 0.83;
+      const fy = by + barH * 0.5;
+      const fh = barH * 0.28;
+      const sw = Math.max(1, Math.round(fill.width * p));
+      const dw = Math.max(2, fw * p);
+      ctx.drawImage(fill, 0, 0, sw, fill.height, fx, fy, dw, fh);
+    }
+    if (frame) {
+      ctx.drawImage(frame, bx, by, barW, barH);
+    } else if (!fill) {
+      // 素材未就绪兜底（与图片加载降级同口径）：描边槽 + 色块
+      ctx.strokeStyle = '#6b4a2f';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(bx, by, barW, barH);
+      ctx.fillStyle = '#e8a33d';
+      ctx.fillRect(bx + 3, by + 3, (barW - 6) * p, barH - 6);
+    }
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#5b3d24';
+    ctx.font = 'bold 20px sans-serif';
+    ctx.fillText(`正在配液… 第 ${state.levelIndex + 1} 关`, cx, by - 22);
+    ctx.fillStyle = '#a9805e';
+    ctx.font = '13px sans-serif';
+    ctx.fillText('新鲜果汁制作中', cx, by + barH + 26);
   }
 
   drawGame(state) {

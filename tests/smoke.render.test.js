@@ -106,6 +106,13 @@ const { COLORS } = await import('../js/core/levels.js');
 const main = new Main();
 const { logic, renderer, anims } = main;
 
+// 驱动 loading 场景至进局（PRD-关卡生成异步化：进关/下一关/重开均分帧生成，冒烟一次性喂满）
+const finishLoading = () => {
+  let n = 0;
+  while (main.scene === 'loading' && n++ < 100000) main.stepLoading();
+  assert.strictEqual(main.scene, 'game', 'loading 应在有限步内完成');
+};
+
 let failed = 0;
 function check(name, fn) {
   try {
@@ -135,6 +142,7 @@ check('点击开始 → 关卡选择页（第 1 关可挑战，后续锁定）',
 
 check('选择第 1 关 → 进入游戏，关卡载入 + 布局生成', () => {
   tap(renderer.levelBtns[0].x + 5, renderer.levelBtns[0].y + 5);
+  finishLoading(); // 进关走 loading 分帧生成（PRD-关卡生成异步化）
   assert.strictEqual(main.scene, 'game');
   assert.ok(logic.bottles.length > 0);
   assert.strictEqual(renderer.bottleRects.length, logic.bottles.length);
@@ -218,9 +226,35 @@ check('撤回按钮：恢复上一步', () => {
 
 check('重开按钮：关卡重置', () => {
   tap(renderer.restartBtn.x, renderer.restartBtn.y);
+  finishLoading(); // 重开走 loading 分帧生成（PRD-关卡生成异步化）
   assert.strictEqual(logic.moveCount, 0);
   assert.strictEqual(logic.undoStack.length, 0);
   assert.strictEqual(main.selected, -1);
+});
+
+check('loading 场景：进关先入 loading、进度推进、触摸吞掉、完成后切 game（AC-04）', () => {
+  main.cleared = 5;
+  main.selectLevel(4); // L5 慢关概率低，任意关即可
+  assert.strictEqual(main.scene, 'loading', 'selectLevel 后应先进 loading');
+  assert.ok(main.logic.genProgress() && main.logic.genProgress().pending, '生成会话应进行中');
+  // 喂两帧小预算：loading 期绘制不抛错 + 点击被吞（无场景跳转）
+  main.stepLoading();
+  main.stepLoading();
+  main.tick(); // 绘制 loading 页（含位图进度条路径）
+  const sceneBefore = main.scene;
+  tap(renderer.menuPlayBtn.x, renderer.menuPlayBtn.y); // 任意点击，loading 应吞掉
+  assert.strictEqual(main.scene, sceneBefore, 'loading 期触摸应被吞掉');
+  // 喂满完成
+  finishLoading();
+  assert.strictEqual(main.scene, 'game');
+  assert.strictEqual(main.levelIndex, 4);
+  assert.ok(logic.bottles.length > 0, '生成完成后局面应就绪');
+  // 首帧只画不推进（用户拍板：所有关卡都渲染 loading）：tick 后仍在 loading，快关也不跳帧
+  main.cleared = 6;
+  main.selectLevel(5);
+  main.tick();
+  assert.strictEqual(main.scene, 'loading', '首帧应只渲染 loading 不推进生成');
+  finishLoading();
 });
 
 check('道具：打乱 → 选瓶模式 → 点瓶打乱、层集合不变、次数用尽后无效', () => {
@@ -630,6 +664,7 @@ check('AC-12：旧进度 cleared=8 语义 —— 第 9 关可挑战、第 10 关
   main.tick();
   const card9 = renderer.levelBtns[8];
   tap(card9.x + 5, card9.y + 5);
+  finishLoading();
   assert.strictEqual(main.scene, 'game');
   assert.strictEqual(main.levelIndex, 8, 'cleared=8 应可挑战第 9 关');
   // 第 10 关（index 9）锁定
@@ -671,6 +706,7 @@ check('完整通关流程：走完一关 → 胜利面板 → 下一关', () => 
 
   // 点击「下一关」
   tap(renderer.nextBtn.x + renderer.nextBtn.w / 2, renderer.nextBtn.y + renderer.nextBtn.h / 2);
+  finishLoading();
   assert.strictEqual(main.levelIndex, 1, '应进入第 2 关');
   assert.strictEqual(main.cleared, 1, '通关第 1 关后解锁进度应为 1');
   assert.strictEqual(logic.moveCount, 0, '新关步数应清零');
@@ -764,6 +800,7 @@ check('退出 → 返回开始菜单（进度保留）→ 设置 → 重置进�
   tap(renderer.menuPlayBtn.x + 5, renderer.menuPlayBtn.y + 5);
   assert.strictEqual(main.scene, 'levelSelect');
   tap(renderer.levelBtns[0].x + 5, renderer.levelBtns[0].y + 5);
+  finishLoading(); // 进关走 loading 分帧生成（PRD-关卡生成异步化）
   assert.strictEqual(main.scene, 'game');
   assert.strictEqual(main.levelIndex, 0);
   assert.strictEqual(main.cleared, 0, '重置后解锁进度应为 0');
@@ -790,6 +827,7 @@ check('设置页兑换码输入：unlock_all 解锁全部关卡、无效码提�
   main.scene = 'levelSelect';
   main.tick();
   main.selectLevel(99);
+  finishLoading();
   assert.strictEqual(main.scene, 'game', 'unlock_all 后第 100 关应可挑战');
   assert.strictEqual(main.levelIndex, 99);
   main.scene = 'settings';
@@ -856,6 +894,7 @@ check('混合容量关渲染：第 11 关（原 L26）底对齐、瓶高 ∝ 容
 check('满瓶完成徽章链：满色瓶停留 ✓ 徽章 → 徽章结束后才起飞货架', () => {  // 进入 L1，DFS 求解路径（与 AC-11 同源），逐步经 tap 驱动真实 UI 动画链
   main.cleared = 1;
   main.selectLevel(0);
+  finishLoading();
   main.tick();
   assert.strictEqual(main.scene, 'game');
 
@@ -1311,6 +1350,7 @@ check('炸弹瓶：角标渲染 + 倒计时递减 + 失败弹窗链路 + 广告�
   }
   assert.ok(main.failPanel);
   tap(renderer.failRestartBtn.x + renderer.failRestartBtn.w / 2, renderer.failRestartBtn.y + renderer.failRestartBtn.h / 2);
+  finishLoading(); // 重开走 loading 分帧生成（生成完成后局面才重建）
   assert.ok(!main.failPanel, '重开后失败弹窗应关闭');
   assert.strictEqual(logic.moveCount, 0, '重开后步数清零');
   assert.deepStrictEqual(logic.bombTimers, logic.bombBottles.map(() => logic.bombMoves), '重开后引信复位');

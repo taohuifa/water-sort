@@ -7,6 +7,9 @@ export const MOVE_REVIVE_BONUS = 10;
 // 炸弹引信加成与 MOVE_REVIVE_BONUS 当前同值，独立导出便于分开调参
 export const BOMB_REVIVE_BONUS = 10;
 
+// 单关生成总耗时预算（PRD-关卡生成异步化 Q4：由 5s 收紧至 3s；超预算走兜底，语义不变）
+const GEN_TOTAL_BUDGET_MS = 3000;
+
 /**
  * 纯逻辑层：瓶子数据结构、倒液规则、满瓶判定、撤回栈、关卡生成。
  * 不依赖 wx / canvas，可在 Node 下独立做单元测试。
@@ -54,10 +57,40 @@ export default class GameLogic {
     this.timeLeft = 0; // 剩余秒（浮点累计，tickTime(dt) 驱动；loadLevel 重置满值）
     this.moveLimit = 0; // 步数上限（0 = 无限；续杯 +10 为上限抬升）
     this.lastGenSolLen = -1; // 最近一次生成接受局面的启发式解长（解长约束断言/工具回填用）
+    // 增量生成会话状态（PRD-关卡生成异步化 F-01：beginGenerate/stepGenerate 共享，见 beginGenerate）
+    this._gen = null;
   }
 
-  /** 载入关卡（同 seed 局面完全一致，可复现）。新参数全部可选，缺省保持旧行为 */
-  loadLevel({
+  /** 载入关卡（同步一次性入口，外部行为不变；内部 = beginGenerate + stepGenerate(∞) 跑满，同 seed 局面完全一致可复现） */
+  loadLevel(cfg) {
+    this.beginGenerate(cfg);
+    while (!this.stepGenerate(Infinity).done);
+  }
+
+  /** 是否有生成会话进行中（main 载入流程判断用） */
+  isGenerating() {
+    return !!this._gen && !this._gen.finalized;
+  }
+
+  /** 生成进度快照（加载界面/调试协议消费）：无会话返回 null；special/mix 会话 budgetMs 为 0（同步即完） */
+  genProgress() {
+    const g = this._gen;
+    if (!g) return null;
+    return {
+      attempts: g.attempt,
+      elapsedMs: Date.now() - g.beginTs,
+      budgetMs: g.deadline ? GEN_TOTAL_BUDGET_MS : 0,
+      pending: !g.finalized,
+    };
+  }
+
+  /**
+   * 增量生成 ① 会话初始化（PRD-关卡生成异步化 F-01）：参数解构 + 字段赋值（原 loadLevel 前半段迁移）。
+   * 特殊关/混合关生成毫秒级 → begin 内同步出结果（异步流程对其单帧即过，行为不变）；
+   * 普通关进入分帧 attempt 状态机：总预算 GEN_TOTAL_BUDGET_MS（原 5s 收紧至 3s，PRD Q4），
+   * 预算内未验证出可解局面 → 兜底返回最后尝试（语义与旧实现完全一致）。
+   */
+  beginGenerate({
     colors,
     empties,
     seed,
@@ -92,24 +125,42 @@ export default class GameLogic {
     // 混合容量瓶（PRD-混合容量瓶）：v1 不与大瓶叠加（配置层强制，双保险）
     this.mix = !!mix && !this.special;
     this.caps = []; // 与 bottles 平行的每瓶容量数组（仅混合关填充）
-    let gen;
+    const g = (this._gen = {
+      done: false, // attempt 循环出口（命中可解 / 预算或硬上限耗尽）
+      finalized: false, // 局面字段回填恰好一次
+      result: null, // 命中可解局面时的生成结果（null = 未命中）
+      attempt: 0, // 已执行 attempt 数（dealSeed = seed + (attempt-1)×997，序号与旧 for 循环一致）
+      last: { bottles: [], locks: [], covers: [], bombs: [], bombMoves: 0 }, // 最后尝试局面（兜底用）
+      beginTs: Date.now(), // 进度字段 elapsedMs 起点（加载界面/调试协议消费）
+      coverLayers, // 收尾回填遮盖层数用（原 loadLevel 局部参数）
+    });
     if (this.special) {
       // 特殊关（大瓶收集，R1/R2）：大瓶专用发牌分支，大瓶固定排在 bottles 末位
-      gen = this._generateBigBottle(colors, noEmptyStart ? 0 : empties, seed, {
+      const gen = this._generateBigBottle(colors, noEmptyStart ? 0 : empties, seed, {
         bigCapacity: this.bigCapacity,
       });
       this.bigIndex = gen.bottles.length - 1;
       this.bigColor = gen.bigColor; // 限定收集色（瓶口颜色限制）
+      g.result = gen;
+      g.done = true;
+      g.attempt = 1;
     } else if (this.mix) {
       // 混合容量关：全瓶容量 3~5 随机（PRD-混合容量瓶 §2）
       this.bigIndex = -1;
       this.bigColor = -1;
-      gen = this._generateMixed(colors, noEmptyStart ? 0 : empties, seed);
+      const gen = this._generateMixed(colors, noEmptyStart ? 0 : empties, seed);
       this.caps = gen.caps;
+      g.result = gen;
+      g.done = true;
+      g.attempt = 1;
     } else {
       this.bigIndex = -1;
       this.bigColor = -1;
-      gen = this._generate(colors, noEmptyStart ? 0 : empties, seed, {
+      // 普通关：attempt 状态机参数（原 _generate 头部迁入）
+      g.opts = {
+        colors,
+        empties: noEmptyStart ? 0 : empties,
+        seed,
         noEmptyStart,
         condLockCount,
         condLockNeed,
@@ -122,19 +173,96 @@ export default class GameLogic {
         timeLimit,
         moveLimit,
         level,
-      });
+      };
+      g.nodeLimit = this.capacity >= 5 ? 200000 : 60000; // nodeLimit 随容量配置化（Q8=B）
+      g.deadline = Date.now() + GEN_TOTAL_BUDGET_MS; // 单关生成总耗时预算
+      g.maxAttempts = 20000; // 防御性硬上限（正常预算内远达不到）
+      this.lastGenSolvable = false;
+      this.lastGenSolLen = -1;
     }
+  }
+
+  /**
+   * 增量生成 ② 推进（F-01）：执行 attempt 循环至多 budgetMs 毫秒。
+   * 单次 attempt（洗牌 + 一次求解器验证）原子执行不内部分割（最坏数百 ms，加载界面前提下属可接受抖动）；
+   * budgetMs = Infinity 即同步跑满（loadLevel 用）。
+   * 循环出口：命中可解局面 → done；总预算耗尽 / MAX_ATTEMPTS 用尽 → done + 兜底（_finalizeGenerate）；
+   * 本帧预算片用完 → 未 done，下帧续跑（暂停/恢复语义）。
+   * 返回 { done, attempts, elapsedMs } 供加载进度与调试协议消费。
+   */
+  stepGenerate(budgetMs = 6) {
+    const g = this._gen;
+    const t0 = Date.now();
+    if (!g) return { done: true, attempts: 0, elapsedMs: 0 };
+    if (!g.done) {
+      while (
+        !g.result &&
+        Date.now() - t0 < budgetMs &&
+        (g.attempt === 0 || Date.now() <= g.deadline) && // 首次必跑（与旧 for 语义一致），之后受总预算约束
+        g.attempt < g.maxAttempts
+      ) {
+        g.attempt++;
+        g.result = this._genAttempt(g); // 命中返回结果；未命中返回 null（g.last 已更新为最后尝试）
+      }
+      if (!g.done) g.done = !!g.result || g.attempt >= g.maxAttempts || Date.now() > g.deadline;
+    }
+    // 收尾恰好一次（含 special/mix 在 begin 内即 done 的会话）
+    if (g.done && !g.finalized) {
+      this._finalizeGenerate(g);
+      g.finalized = true;
+    }
+    return { done: g.done, attempts: g.attempt, elapsedMs: Date.now() - g.beginTs };
+  }
+
+  /**
+   * 增量生成 ③ 收尾（恰好一次）：无结果时走兜底（原 _generate 尾部迁移），
+   * 随后完成局面字段回填（原 loadLevel 后半段迁移）。
+   */
+  _finalizeGenerate(g) {
+    if (!g.result) {
+      // 兜底：预算内未验证出可解局面，返回最后一次（keyLayer 置空避免隐藏误标）
+      if (!this.lastGenSolvable)
+        console.warn(
+          `[game] 关卡生成 ${GEN_TOTAL_BUDGET_MS}ms 预算内未验证出可解局面，兜底返回最后尝试（存在不可解风险）`
+        );
+      // 炸弹关兜底防御（F-06）：解长约束未通过验证 → bombMoves 放大为 lastSolLen + 4（解长可得时），
+      // 保证兜底局面不违反「解长 ≤ bombMoves − 2」安全余量
+      const { bombMoves, moveLimit, timeLimit } = g.opts;
+      let bm = g.last.bombMoves || bombMoves;
+      if (g.last.bombs.length > 0 && this._lastSolLen > 0) {
+        bm = Math.max(bm, this._lastSolLen + 4);
+      }
+      // 限时/步限兜底防御（同炸弹 F-06 模式）：解长约束未通过验证 → 按 solLen 放大（solLen 可得时），
+      // 保证兜底局面不违反「solLen ≤ moveLimit − 2 / solLen × 6 ≤ timeLimit」约束（0 = 不限的关不放大）
+      let genMoveLimit = moveLimit;
+      let genTimeLimit = timeLimit;
+      if (this._lastSolLen > 0) {
+        if (genMoveLimit > 0) genMoveLimit = Math.max(genMoveLimit, this._lastSolLen + 2);
+        if (genTimeLimit > 0) genTimeLimit = Math.max(genTimeLimit, this._lastSolLen * 6);
+      }
+      g.result = {
+        bottles: g.last.bottles,
+        locks: g.last.locks,
+        keyLayer: null,
+        covers: g.last.covers,
+        bombs: g.last.bombs,
+        bombMoves: bm,
+        moveLimit: genMoveLimit,
+        timeLimit: genTimeLimit,
+      };
+    }
+    const gen = g.result;
     this.bottles = gen.bottles;
     this.locks = gen.locks;
     // 遮盖瓶（PRD-玩法扩展 §2 A）：仅普通关管线产出；special/mix 关 gen 无 covers 字段 → 空
     this.coverBottles = gen.covers || [];
-    this.coverLayers = this.coverBottles.length > 0 ? coverLayers : 0;
+    this.coverLayers = this.coverBottles.length > 0 ? g.coverLayers : 0;
     // 炸弹瓶（PRD-玩法扩展 §2 B）：仅普通关管线产出；bombMoves 由生成确定（显式配置或自动口径）
     this.bombBottles = gen.bombs || [];
     this.bombMoves = this.bombBottles.length > 0 ? gen.bombMoves || 0 : 0;
     this.bombTimers = this.bombBottles.map(() => this.bombMoves);
     this.bombDefused = this.bombBottles.map(() => false);
-    // 生成兜底可能按解长放大限时/步限（见 _generate 兜底分支），以生成回传值为准；special/mix 管线无此字段
+    // 生成兜底可能按解长放大限时/步限（见 _finalizeGenerate 兜底分支），以生成回传值为准；special/mix 管线无此字段
     if (gen.timeLimit != null) this.timeLimit = this.timeLeft = gen.timeLimit;
     if (gen.moveLimit != null) this.moveLimit = gen.moveLimit;
     this.unlocked = gen.locks.map(() => false);
@@ -148,17 +276,20 @@ export default class GameLogic {
   // ---------- 关卡生成：随机分层发牌 + 布锁 + 求解器验证，保证必有解 ----------
 
   /**
-   * 生成含锁/隐藏关卡（v3 分级管线，规范要求：不用道具必有解）：
+   * 单次 attempt（原 _generate 循环体逐行迁移，PRD-关卡生成异步化 F-01）：
    * ① 瓶结构 —— 数量 / 每瓶容量（大小）+ 空瓶
    * ② 机制位置 —— 锁瓶与钥匙深度、隐藏槽位（仅依赖结构、不依赖液体颜色；
    *    散打关瓶装量由 ③ 决定 → 机制延后到 ③ 之后按实际装量放置）
    * ③ 液体打散 —— 洗混装瓶（②选定的隐藏槽位在此应用负编码）
-   * ④ 验证 —— 开局无满纯色 + DFS 求解器；不合格换 attempt 重洗
-   * 重试以总耗时预算（5s）为上限兜底（Q8=B）：1 空瓶大关随机发牌可解率低（~3%），
-   * 单次验证极快（<1ms），固定 60 次重试不足，按预算可跑数千次直至命中可解局面。
+   * ④ 验证 —— 开局无满纯色 + DFS 求解器 + 解长约束（限时/步限/炸弹）
+   * 命中可解局面返回生成结果；否则更新 g.last（最后尝试）并返回 null，
+   * 重试与总预算由 stepGenerate 驱动（语义与旧 for 循环一致：首次必跑，其后受 deadline 约束）。
    */
-  _generate(colors, empties, seed, opts = {}) {
+  _genAttempt(g) {
     const {
+      colors,
+      empties,
+      seed,
       noEmptyStart = false,
       condLockCount = 0,
       condLockNeed = 2,
@@ -171,16 +302,10 @@ export default class GameLogic {
       timeLimit = 0,
       moveLimit = 0,
       level = 0,
-    } = opts;
-    const nodeLimit = this.capacity >= 5 ? 200000 : 60000; // nodeLimit 随容量配置化（Q8=B）
-    const deadline = Date.now() + 5000; // 单关生成总耗时预算
-    const MAX_ATTEMPTS = 20000; // 防御性硬上限（正常预算内远达不到）
-    let last = { bottles: [], locks: [], covers: [], bombs: [], bombMoves: 0 };
-    this.lastGenSolvable = false;
-    this.lastGenSolLen = -1;
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-      if (attempt > 0 && Date.now() > deadline) break;
-      const dealSeed = seed + attempt * 997;
+    } = g.opts;
+    const nodeLimit = g.nodeLimit;
+    const attempt = g.attempt - 1; // dealSeed 序号与旧 for 循环一致（g.attempt 已在 stepGenerate 内自增）
+    const dealSeed = seed + attempt * 997;
       const rng = new Rng(dealSeed); // 与打散同 rng 序列（同 seed 可复现；重试随 attempt 变化）
       let locks = [];
       let keyLayer = null;
@@ -239,8 +364,8 @@ export default class GameLogic {
       }
       // ④ 验证：开局不允许直接存在已完成的满瓶纯色
       if (bottles.some((b) => this._isFullMono(b))) {
-        last = { bottles, locks, covers, bombs, bombMoves: 0 };
-        continue;
+        g.last = { bottles, locks, covers, bombs, bombMoves: 0 };
+        return null;
       }
       const lockInfo = {
         // 求解器精确模拟钥匙倒出
@@ -251,22 +376,22 @@ export default class GameLogic {
           .filter((l) => l.type === 'cond')
           .concat(covers.map((b) => ({ bottle: b, type: 'cond', need: coverLayers }))),
       };
-      last = { bottles, locks, covers, bombs, bombMoves: 0 };
+      g.last = { bottles, locks, covers, bombs, bombMoves: 0 };
       // 带锁/带遮盖求解器验证局面必有解
       if (this._solvable(bottles, nodeLimit, null, lockInfo)) {
         const solLen = Math.max(1, this._lastSolLen);
         // 限时/步限解长约束（PRD-限时与步数限制 F-04，与炸弹解长约束同模式）：
         // 解长 ≤ moveLimit − 2 且 解长 × 6 ≤ timeLimit，显式配置违例 → 换 seed 重洗。
         // 配置层（levels.js _validateLimits）已按 par 放大的关：solLen ≤ par 恒不触发重洗（零扰动）
-        if (moveLimit > 0 && solLen > moveLimit - 2) continue;
-        if (timeLimit > 0 && solLen * 6 > timeLimit) continue;
+        if (moveLimit > 0 && solLen > moveLimit - 2) return null;
+        if (timeLimit > 0 && solLen * 6 > timeLimit) return null;
         // 炸弹解长约束（PRD-玩法扩展 §2 B）：解长 ≤ bombMoves - 2（安全余量）。
         // 通关必清空所有瓶 → 可行解路径中途必不引爆，约束即完整约束，求解器无需建模引爆。
         // 胜利条件已由 _solvable 验证，此处用其启发式解长（par 上界）做廉价校准：
         let bm = bombMoves;
         if (bombCount > 0) {
           if (bm > 0) {
-            if (solLen > bm - 2) continue; // 显式配置余量不足 → 换 seed 重洗
+            if (solLen > bm - 2) return null; // 显式配置余量不足 → 换 seed 重洗
           } else {
             // 自动口径：解长 + 余量 4，向下不小于 8（par ≤ 启发式解长 → par ≤ bm - 4，方向偏松）
             bm = Math.max(8, solLen + 4);
@@ -276,33 +401,7 @@ export default class GameLogic {
         this.lastGenSolLen = this._lastSolLen;
         return { bottles, locks, keyLayer, covers, bombs, bombMoves: bm };
       }
-    }
-    // 兜底：全部尝试失败的概率极低；返回最后一次（keyLayer 置空避免隐藏误标）
-    if (!this.lastGenSolvable) console.warn('[game] 关卡生成 5s 预算内未验证出可解局面，兜底返回最后尝试（存在不可解风险）');
-    // 炸弹关兜底防御（F-06）：解长约束未通过验证 → bombMoves 放大为 lastSolLen + 4（解长可得时），
-    // 保证兜底局面不违反「解长 ≤ bombMoves − 2」安全余量
-    let bm = last.bombMoves || bombMoves;
-    if (last.bombs.length > 0 && this._lastSolLen > 0) {
-      bm = Math.max(bm, this._lastSolLen + 4);
-    }
-    // 限时/步限兜底防御（同炸弹 F-06 模式）：解长约束未通过验证 → 按 solLen 放大（solLen 可得时），
-    // 保证兜底局面不违反「solLen ≤ moveLimit − 2 / solLen × 6 ≤ timeLimit」约束（0 = 不限的关不放大）
-    let genMoveLimit = moveLimit;
-    let genTimeLimit = timeLimit;
-    if (this._lastSolLen > 0) {
-      if (genMoveLimit > 0) genMoveLimit = Math.max(genMoveLimit, this._lastSolLen + 2);
-      if (genTimeLimit > 0) genTimeLimit = Math.max(genTimeLimit, this._lastSolLen * 6);
-    }
-    return {
-      bottles: last.bottles,
-      locks: last.locks,
-      keyLayer: null,
-      covers: last.covers,
-      bombs: last.bombs,
-      bombMoves: bm,
-      moveLimit: genMoveLimit,
-      timeLimit: genTimeLimit,
-    };
+    return null; // 本 attempt 未命中（重试与兜底由 stepGenerate / _finalizeGenerate 驱动）
   }
 
   /**
