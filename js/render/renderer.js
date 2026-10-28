@@ -74,6 +74,7 @@ export default class Renderer {
     load('iconUndo', 'assets/images/icon-undo.png');
     load('iconShuffle', 'assets/images/icon-shuffle.png');
     load('iconAdd', 'assets/images/icon-add.png');
+    load('iconRevive', 'assets/images/icon-revive.png'); // 续杯图标（AI 生成，与既有金黄圆钮图标同风格）
     load('iconRestart', 'assets/images/icon-restart.png');
     // 加载进度条（PRD-关卡生成异步化与加载界面 F-04）：位图外框 + 果汁填充（源裁剪显示进度）
     load('loadingBarFrame', 'assets/images/loading-bar.png');
@@ -414,10 +415,12 @@ export default class Renderer {
     }
   }
 
-  /** 一行 m 瓶的离散 x 坐标：瓶距 = 基础缝 12px + 随机份额（seed 可复现），两端均分居中，保证不重叠 */
+  /** 一行 m 瓶的离散 x 坐标：瓶距 = 基础缝 12px + 随机份额（上限 26px/缝），瓶群整体居中（2026-10-28：集中布局，避免大屏少量瓶时过度离散） */
   _scatterRowXs(m, bw, availW, rng) {
     const baseGap = 12;
+    const maxExtraPerGap = 26;
     const slack = Math.max(0, availW - m * bw - (m - 1) * baseGap);
+    const extraTotal = Math.min(slack, (m - 1) * maxExtraPerGap); // 只吸收少量剩余宽度，其余让位给居中
     const weights = [];
     let wSum = 0;
     for (let i = 0; i < m - 1; i++) {
@@ -425,11 +428,12 @@ export default class Renderer {
       weights.push(w);
       wSum += w;
     }
-    let x = (this.W - (m * bw + (m - 1) * baseGap + slack)) / 2;
+    const clusterW = m * bw + (m - 1) * baseGap + extraTotal;
+    let x = (this.W - clusterW) / 2;
     const xs = [];
     for (let i = 0; i < m; i++) {
       xs.push(x);
-      x += bw + baseGap + (i < m - 1 ? (slack * weights[i]) / (wSum || 1) : 0);
+      x += bw + baseGap + (i < m - 1 ? (extraTotal * weights[i]) / (wSum || 1) : 0);
     }
     return xs;
   }
@@ -872,15 +876,27 @@ export default class Renderer {
     ctx.font = 'bold 13px sans-serif';
     ctx.fillStyle = '#8A6234';
     ctx.fillText(`已通关 ${state.cleared} / ${this.levelCount} 关 · 通关解锁下一关`, this.W / 2, this.H * 0.09 + 26);
-    // 道具背包数量（PRD-道具背包 + 续杯 F-10）：纯文本行，与页面风格一致（无美术素材）
+    // 道具背包数量（PRD-道具背包 + 续杯 F-10）：图标 + 数量行（图标辅助识别，不再纯文字）
     const inv = state.inv || { undo: 0, shuffle: 0, addBottle: 0, revive: 0 };
-    ctx.font = 'bold 13px sans-serif';
-    ctx.fillStyle = '#7A5C3E';
-    ctx.fillText(
-      `道具　撤回 ×${inv.undo}　打乱 ×${inv.shuffle}　加瓶 ×${inv.addBottle}　续杯 ×${inv.revive || 0}`,
-      this.W / 2,
-      this.H * 0.09 + 46
-    );
+    const items = [
+      ['iconUndo', inv.undo],
+      ['iconShuffle', inv.shuffle],
+      ['iconAdd', inv.addBottle],
+      ['iconRevive', inv.revive || 0],
+    ];
+    const slotGap = 82;
+    const rowW = (items.length - 1) * slotGap;
+    const iy = this.H * 0.09 + 46;
+    items.forEach(([key, count], i) => {
+      const x = this.W / 2 - rowW / 2 + i * slotGap;
+      const icon = this.images[key]; // 图标未加载完成时降级为纯文字
+      if (icon) ctx.drawImage(icon, x - 24, iy - 9, 18, 18);
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillStyle = '#7A5C3E';
+      ctx.textAlign = 'left';
+      ctx.fillText(`×${count}`, x - 2, iy + 5);
+    });
+    ctx.textAlign = 'center';
 
     // 自适应列数（Q6=A）：宽屏 4 列，窄屏 3 列；30 关竖向滚动
     const cols = this.W >= 414 ? 4 : 3;
@@ -1943,7 +1959,7 @@ export default class Renderer {
       [this.shuffleBtn, '打乱', state.inv.shuffle > 0, state.inv.shuffle, 'iconShuffle'],
       [this.addBottleBtn, '加瓶', state.inv.addBottle > 0, state.inv.addBottle, 'iconAdd'],
       // 续杯（PRD-限时与步数限制 F-10）：库存展示位，消耗入口在失败弹窗（库存 0 置灰仍可点提示）
-      [this.reviveBtn, '续杯', true, state.inv.revive || 0, null],
+      [this.reviveBtn, '续杯', true, state.inv.revive || 0, 'iconRevive'],
       [this.restartBtn, '重开', true, 0, 'iconRestart'],
     ];
     for (const [btn, label, enabled, uses, icon] of entries) {
