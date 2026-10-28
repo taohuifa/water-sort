@@ -7,8 +7,10 @@ export const MOVE_REVIVE_BONUS = 10;
 // 炸弹引信加成与 MOVE_REVIVE_BONUS 当前同值，独立导出便于分开调参
 export const BOMB_REVIVE_BONUS = 10;
 
-// 单关生成总耗时预算（PRD-关卡生成异步化 Q4：由 5s 收紧至 3s；超预算走兜底，语义不变）
-const GEN_TOTAL_BUDGET_MS = 3000;
+// 单关生成总耗时预算（PRD-关卡生成异步化 Q4：原 5s 收紧至 3s；2026-10-28 D 方案放宽至 9s——
+// 慢引擎（devtools/真机）单 attempt ≈ Node ×10（~2ms），9s ≈ 慢引擎 4000+ attempts，
+// 覆盖普查次坏关（38 关 >3000 中保留段最高 3740）；根治方案见 Backlog B-8 牌面预计算缓存）
+const GEN_TOTAL_BUDGET_MS = 9000;
 
 /**
  * 纯逻辑层：瓶子数据结构、倒液规则、满瓶判定、撤回栈、关卡生成。
@@ -87,7 +89,7 @@ export default class GameLogic {
   /**
    * 增量生成 ① 会话初始化（PRD-关卡生成异步化 F-01）：参数解构 + 字段赋值（原 loadLevel 前半段迁移）。
    * 特殊关/混合关生成毫秒级 → begin 内同步出结果（异步流程对其单帧即过，行为不变）；
-   * 普通关进入分帧 attempt 状态机：总预算 GEN_TOTAL_BUDGET_MS（原 5s 收紧至 3s，PRD Q4），
+   * 普通关进入分帧 attempt 状态机：总预算 GEN_TOTAL_BUDGET_MS（D 方案后 9s，见常量处注释），
    * 预算内未验证出可解局面 → 兜底返回最后尝试（语义与旧实现完全一致）。
    */
   beginGenerate({
@@ -306,6 +308,7 @@ export default class GameLogic {
     const nodeLimit = g.nodeLimit;
     const attempt = g.attempt - 1; // dealSeed 序号与旧 for 循环一致（g.attempt 已在 stepGenerate 内自增）
     const dealSeed = seed + attempt * 997;
+    g.lastDealSeed = dealSeed; // 命中牌面的实际 dealSeed 直读（seed 规范化/工具用：记录它即可让运行时首 attempt 命中）
       const rng = new Rng(dealSeed); // 与打散同 rng 序列（同 seed 可复现；重试随 attempt 变化）
       let locks = [];
       let keyLayer = null;

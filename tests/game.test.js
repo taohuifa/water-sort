@@ -78,12 +78,12 @@ const CURVE_TABLE = [
   [4, 2, 4, 1, 0, 2, 0, false, 106], [4, 2, 4, 1, 0, 2, 0, false, 105], [5, 2, 4, 2, 0, 2, 0, false, 108],
   [5, 2, 4, 2, 0, 2, 0, false, 107], [6, 2, 4, 3, 0, 2, 0, false, 110], [6, 2, 4, 3, 0, 2, 0, false, 109],
   [4, 2, 4, 0, 0, 2, 0, false, null], [6, 1, 4, 0, 0, 2, 0, false, 127], [7, 2, 4, 4, 0, 2, 0, false, null],
-  [7, 2, 4, 4, 0, 2, 0, false, 112], [6, 2, 4, 0, 0, 2, 0, false, 118], [8, 1, 4, 5, 0, 2, 0, false, null],
-  [8, 1, 4, 5, 0, 2, 0, false, 119], [6, 2, 4, 0, 0, 2, 0, false, 114], [8, 2, 4, 5, 0, 2, 0, false, 115],
-  [8, 1, 4, 5, 0, 2, 0, false, 117], [6, 2, 4, 0, 0, 2, 0, false, null], [6, 1, 3, 4, 0, 2, 0, false, null],
-  [6, 1, 4, 0, 0, 2, 0, false, 124], [8, 1, 4, 5, 0, 2, 0, false, 120], [6, 1, 5, 4, 0, 2, 0, false, 123],
-  [8, 1, 4, 5, 1, 2, 0, false, null], [8, 1, 4, 5, 1, 2, 0, false, 125], [8, 1, 4, 5, 0, 2, 1, false, null],
-  [8, 1, 4, 5, 1, 2, 1, false, 139], [7, 0, 4, 4, 0, 2, 0, true, null], [6, 2, 5, 0, 0, 2, 0, false, null],
+  [7, 2, 4, 4, 0, 2, 0, false, 112], [6, 2, 4, 0, 0, 2, 0, false, 118], [8, 1, 4, 5, 0, 2, 0, false, 6098], // L15 规范化 seed
+  [8, 1, 4, 5, 0, 2, 0, false, 36011], [6, 2, 4, 0, 0, 2, 0, false, 114], [8, 2, 4, 5, 0, 2, 0, false, 115],
+  [8, 1, 4, 5, 0, 2, 0, false, 36009], [6, 2, 4, 0, 0, 2, 0, false, null], [6, 1, 3, 4, 0, 2, 0, false, 2116], // L19/L21 规范化 seed
+  [6, 1, 4, 0, 0, 2, 0, false, 124], [8, 1, 4, 5, 0, 2, 0, false, 1117], [6, 1, 5, 4, 0, 2, 0, false, 29036],
+  [8, 1, 4, 5, 1, 2, 0, false, 1375986], [8, 1, 4, 5, 1, 2, 0, false, 231429], [8, 1, 4, 5, 0, 2, 1, false, 1608289], // L25/L26/L27 规范化 seed
+  [8, 1, 4, 5, 1, 2, 1, false, 4141677], [7, 0, 4, 4, 0, 2, 0, true, 2259332], [6, 2, 5, 0, 0, 2, 0, false, null], // L28/L29 规范化 seed
 ];
 
 test('AC-01：L1~L30 参数与重排后总表逐项一致（冻结红线：铺量 100 关后零扰动）', () => {
@@ -323,13 +323,17 @@ test('同 seed 两次生成局面完全一致（可复现，含锁与钥匙位�
   assert.deepStrictEqual(a.locks, b.locks);
 });
 
-test('AC-02/D-10：全部关卡生成通过求解器验证（含锁瓶/无空瓶开局），单关耗时预算内（PRD-关卡生成异步化 Q4：3s）', () => {
+test('AC-02/D-10：全部关卡生成通过求解器验证，且记录 seed 必须「首 attempt 命中」（seed 规范化不变量）', () => {
   for (let i = 0; i < LEVELS.length; i++) {
     const logic = new GameLogic();
     const t0 = Date.now();
     logic.loadLevel(LEVELS[i]);
     const ms = Date.now() - t0;
     assert.ok(logic.lastGenSolvable, `第 ${i + 1} 关生成未通过求解器验证`);
+    // seed 规范化不变量：配置记录的 seed = 命中牌面的 dealSeed → 运行时第 1 次 attempt 即命中，
+    // 不重放历史重试链（2026-10-28 用户方案）。新关/重摇后若本断言失败，需重新规范化 seed。
+    const attempts = logic.genProgress()?.attempts ?? 1;
+    assert.strictEqual(attempts, 1, `第 ${i + 1} 关 seed 未首中（attempts=${attempts}），需重算固化 seed`);
     assert.ok(ms < 3000, `第 ${i + 1} 关生成耗时 ${ms}ms 超预算（GEN_TOTAL_BUDGET_MS）`);
     if (ms > 200) console.log(`      第 ${i + 1} 关生成耗时 ${ms}ms`);
   }
