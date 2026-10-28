@@ -1,4 +1,4 @@
-import GameLogic from './core/game.js';
+import GameLogic, { BOMB_REVIVE_BONUS, MOVE_REVIVE_BONUS, TIME_REVIVE_BONUS } from './core/game.js';
 import { buildLevelsFromConfig, parseJsonc, COLORS } from './core/levels.js';
 import { applyGrant, canConsume, consume, mergeInventory } from './core/inventory.js';
 import { calcStars, mergeRecord, sanitizeRecord } from './core/stars.js';
@@ -80,7 +80,8 @@ export default class Main {
     this.winDelay = 0;
     this.failPanel = false; // 失败弹窗（PRD-玩法扩展 §2 B：重开 / 广告复活）
     this.failDelay = 0; // 引爆闪光累计时长（0.6s 后弹失败面板）
-    this.failFlashIdx = -1; // 引爆瓶下标（-1 = 无闪光）
+    this.failFlashIdx = -1; // 引爆瓶下标（-1 = 无闪光；时间/步数失败无闪光，仅延时弹窗）
+    this.failLatch = false; // 失败检测门闩（首次 isFailed 记录闪光/计时起点，避免时间/步数失败每帧重置）
     this.scene = 'menu'; // 'menu' | 'settings' | 'levelSelect' | 'game'
     this.pauseOverlay = false;
     this.inv = mergeInventory(wx.getStorageSync(INV_KEY)); // 全局道具背包（PRD-道具背包，废除每关出厂 props）
@@ -141,6 +142,7 @@ export default class Main {
     this.failPanel = false; // 失败流程态随关卡重置（PRD-玩法扩展 §2 B）
     this.failDelay = 0;
     this.failFlashIdx = -1;
+    this.failLatch = false;
     this.shuffleSelecting = false;
     this.winStats = null; // 新局清空上一局结算态（PRD-三星评价）
     this.logic.loadLevel(LEVELS[idx]);
@@ -349,14 +351,38 @@ export default class Main {
       return;
     }
 
-    // 失败弹窗（PRD-玩法扩展 §2 B）：重开本关 / 看广告复活（开发模式直接发放）
+    // 广告补给确认浮层（看广告 / 取消）——置于失败弹窗之前：续杯库存 0 的补给浮层
+    // 覆盖在失败弹窗之上（adConfirm 与 failReviveBtn 同坐标，必须先于 failPanel 分支派发）
+    if (this.adConfirm) {
+      if (this.renderer.inRect(x, y, this.renderer.adConfirmWatchBtn)) {
+        const type = this.adConfirm;
+        this.adConfirm = null;
+        this.audio.play('button');
+        // 看激励视频补充道具（开发模式直接发放）；续杯补给后自动使用（PRD-限时与步数限制 F-10）
+        const label = { undo: '撤回', shuffle: '打乱', addBottle: '加瓶', revive: '续杯' }[type] || type;
+        this.ads.watch(() => {
+          this.inv[type] = (this.inv[type] || 0) + 1;
+          this.saveInventory();
+          if (type === 'revive') this._useRevive();
+          else this.renderer.showToast(`已补充 1 次${label}`);
+        });
+      } else if (this.renderer.inRect(x, y, this.renderer.adConfirmCancelBtn)) {
+        this.adConfirm = null;
+        this.audio.play('button');
+      }
+      return;
+    }
+
+    // 失败弹窗（PRD-玩法扩展 §2 B + PRD-限时与步数限制 F-10）：重开本关 / 续杯继续
     if (this.failPanel) {
       if (this.renderer.inRect(x, y, this.renderer.failRestartBtn)) {
         this.audio.play('button');
-        this.loadLevel(this.levelIndex); // 重开：bombs/timers 随关卡重建
+        this.loadLevel(this.levelIndex); // 重开：bombs/timers/timeLeft/moveLimit 随关卡重建
       } else if (this.renderer.inRect(x, y, this.renderer.failReviveBtn)) {
         this.audio.play('button');
-        this.ads.watch(() => this.revive());
+        // 统一续杯语义：库存 > 0 消耗 1 个复活；库存 0 → 广告确认浮层（补 1 后自动使用）
+        if (canConsume(this.inv, 'revive')) this._useRevive();
+        else this.adConfirm = 'revive';
       }
       return;
     }
@@ -372,25 +398,7 @@ export default class Main {
       return;
     }
 
-    // 广告补给确认浮层（看广告 / 取消）
-    if (this.adConfirm) {
-      if (this.renderer.inRect(x, y, this.renderer.adConfirmWatchBtn)) {
-        const type = this.adConfirm;
-        this.adConfirm = null;
-        this.audio.play('button');
-        // 看激励视频补充道具（开发模式直接发放）
-        const label = { undo: '撤回', shuffle: '打乱', addBottle: '加瓶' }[type] || type;
-        this.ads.watch(() => {
-          this.inv[type] = (this.inv[type] || 0) + 1;
-          this.saveInventory();
-          this.renderer.showToast(`已补充 1 次${label}`);
-        });
-      } else if (this.renderer.inRect(x, y, this.renderer.adConfirmCancelBtn)) {
-        this.adConfirm = null;
-        this.audio.play('button');
-      }
-      return;
-    }
+    // 广告补给确认浮层已提前至失败弹窗之前处理（续杯补给覆盖失败弹窗，见上）
 
     // 暂停浮层（继续 / 退出）
     if (this.pauseOverlay) {
@@ -439,6 +447,14 @@ export default class Main {
     }
     if (this.renderer.inCircle(x, y, this.renderer.addBottleBtn)) {
       this.useAddBottle();
+      return;
+    }
+    if (this.renderer.inCircle(x, y, this.renderer.reviveBtn)) {
+      // 续杯在局内仅作库存展示（消耗入口在失败弹窗，PRD-限时与步数限制 F-10）
+      this.audio.play('button');
+      this.renderer.showToast(
+        canConsume(this.inv, 'revive') ? '失败后点「续杯 · 继续」消耗' : '续杯不足：失败弹窗可看广告补充'
+      );
       return;
     }
     if (this.renderer.inCircle(x, y, this.renderer.restartBtn)) {
@@ -699,23 +715,23 @@ export default class Main {
   }
 
   /**
-   * 广告复活（PRD-玩法扩展 §2 B）：回退最多 3 步（undo×3，栈不足回退全部；不走背包 undo 账本——
-   * 回退是广告换的复活效果本身）+ 重置所有未拆除炸弹倒计时为初值，继续游戏。
+   * 续杯·继续（PRD-限时与步数限制 F-10 统一复活语义，替代旧「undo×3 + 引信重置」广告复活）：
+   * 消耗背包 revive 1 个 → core applyRevive 按 failReason 加成（时 +60 / 步限上限 +10 / 引信 +10 封顶初值）
+   * → 解除失败态继续（不回退局面）。库存判定与广告补给入口在 onTap 分支。
    */
-  revive() {
-    let n = 0;
-    while (n < 3 && this.logic.undoStack.length > 0) {
-      this.logic.undo();
-      n++;
-    }
-    this.logic.resetBombs();
+  _useRevive() {
+    const reason = this.logic.applyRevive();
+    consume(this.inv, 'revive');
+    this.saveInventory();
     this.failPanel = false;
     this.failDelay = 0;
     this.failFlashIdx = -1;
+    this.failLatch = false;
     this.selected = -1;
     this.renderer.displayedCompleted = this.logic.completed.length;
-    this.refreshBoard(); // 幂等（复活不改变瓶数，防御性刷新）
-    this.renderer.showToast('复活成功！炸弹引信已重置');
+    // bomb 加成走 BOMB_REVIVE_BONUS（与 MOVE_REVIVE_BONUS 当前同值，独立调参）
+    const bonus = { time: `时间 +${TIME_REVIVE_BONUS} 秒`, moves: `步数上限 +${MOVE_REVIVE_BONUS}`, bomb: `引信 +${BOMB_REVIVE_BONUS}` }[reason] || '继续';
+    this.renderer.showToast(`续杯成功！${bonus}`);
   }
 
   // ---------- 主循环 ----------
@@ -745,12 +761,16 @@ export default class Main {
       return t >= 0 ? t : 0;
     });
     const fail = this.failPanel;
+    // 限时/步限（PRD-限时与步数限制 F-07）：剩余秒（整数）+ 步限上限 + 失败原因，全部入签名
+    const timeLeft = Math.max(0, Math.round(this.logic.timeLeft));
+    const moveLimit = this.logic.moveLimit;
+    const failReason = this.logic.failReason || '';
     const sig = [this.scene, this.pauseOverlay, this.levelIndex, this.selected,
       this.winPanel, this.adConfirm, this.shuffleSelecting, this.cleared,
       this.bigIntro, R.levelScroll,
-      this.inv.undo, this.inv.shuffle, this.inv.addBottle,
+      this.inv.undo, this.inv.shuffle, this.inv.addBottle, this.inv.revive,
       moves, par, stars, covers.join(','), completedCount,
-      bombs.join(','), fail].join('|');
+      bombs.join(','), fail, timeLeft, moveLimit, failReason].join('|');
     const now = Date.now();
     if (sig === this._dbgSig && now - this._dbgTs < 2000) return;
     this._dbgSig = sig;
@@ -761,7 +781,9 @@ export default class Main {
         sel: this.selected, win: this.winPanel, ad: this.adConfirm,
         shuf: this.shuffleSelecting, cleared: this.cleared, intro: this.bigIntro, t: now,
         invUndo: this.inv.undo, invShuffle: this.inv.shuffle, invAddBottle: this.inv.addBottle,
+        invRevive: this.inv.revive, // 续杯库存（PRD-限时与步数限制 F-07）
         moves, par, stars, // 三星评价：当前步数 / 关卡 par / 结算星级（非结算态 0）
+        timeLeft, moveLimit, failReason, // 限时/步限：剩余秒（整数）/ 上限（0=无限）/ 失败原因（''=未失败）
         covers, completedCount, // 遮盖瓶：各瓶剩余遮盖层数摘要（0=无遮盖或已揭示）/ 解封计数器
         bombs, fail, // 炸弹瓶：各瓶剩余引信摘要（0=无炸弹或已拆除）/ 失败弹窗态
         btns: {
@@ -777,6 +799,7 @@ export default class Main {
           undo: {xy: cCircle(R.undoBtn), scenes: ['game']},
           shuffle: {xy: cCircle(R.shuffleBtn), scenes: ['game']},
           add_bottle: {xy: cCircle(R.addBottleBtn), scenes: ['game']},
+          revive: {xy: cCircle(R.reviveBtn), scenes: ['game']},
           restart: {xy: cCircle(R.restartBtn), scenes: ['game']},
           sound_toggle: {xy: cRect(R.settingsSoundToggle), scenes: ['settings']},
           settings_reset: {xy: cRect(R.settingsResetBtn), scenes: ['settings']},
@@ -797,6 +820,19 @@ export default class Main {
     this.lastTs = now;
 
     this.anims.update(dt);
+
+    // 限时推进（PRD-限时与步数限制 F-05）：任一浮层打开时停喂即暂停（win/fail/pause/ad/bigIntro），
+    // core 零感知暂停态；失败/胜利面板弹出后同样停喂，重开 loadLevel 重置满值
+    if (
+      this.scene === 'game' &&
+      !this.winPanel &&
+      !this.failPanel &&
+      !this.pauseOverlay &&
+      !this.adConfirm &&
+      !this.bigIntro
+    ) {
+      this.logic.tickTime(dt);
+    }
 
     // 通关判定（等所有动画落地后再弹面板）
     if (
@@ -820,13 +856,20 @@ export default class Main {
       }
     }
 
-    // 失败判定（PRD-玩法扩展 §2 B）：任一未拆除炸弹倒计时归零 → 引爆瓶红色闪光 0.6s → 失败弹窗
-    if (this.scene === 'game' && !this.winPanel && this.logic.isFailed()) {
-      if (this.failFlashIdx < 0) {
-        this.failFlashIdx = this.logic.bombBottles.findIndex(
-          (bi, k) => !this.logic.bombDefused[k] && this.logic.bombTimers[k] <= 0
-        );
+    // 失败判定（PRD-玩法扩展 §2 B + PRD-限时与步数限制 F-02/F-03）：炸弹引信归零 / 时间归零 / 步数达限
+    // 门闩 failLatch：首次失败记录闪光下标与计时起点（时间/步数失败无引爆瓶，
+    // 旧逻辑依赖 failFlashIdx 置位会导致 failDelay 每帧重置、面板永弹不出）；!isWin() 守卫
+    // 步限关「最后一步恰好通关」不误判失败（通关面板优先，与 core isFailed 的 OR 语义解耦）
+    if (this.scene === 'game' && !this.winPanel && !this.logic.isWin() && this.logic.isFailed()) {
+      if (!this.failLatch) {
+        this.failLatch = true;
         this.failDelay = 0;
+        this.failFlashIdx =
+          this.logic.failReason === 'bomb'
+            ? this.logic.bombBottles.findIndex(
+                (bi, k) => !this.logic.bombDefused[k] && this.logic.bombTimers[k] <= 0
+              )
+            : -1; // 时间/步数失败无引爆瓶闪光，仅延时弹窗
         this.audio.play('invalid'); // 引爆音（暂复用非法音，待音频侧补充爆炸音）
       }
       // 动画与暂停期间不推进弹窗计时（与通关面板同口径）
@@ -834,11 +877,14 @@ export default class Main {
         this.failDelay += dt;
         if (this.failDelay > 0.6) this.failPanel = true;
       }
-    } else if (this.failFlashIdx >= 0 && !this.logic.isFailed()) {
-      // 玩家在 0.6s 闪光窗口内撤销（或复活）解除了失败态 → 复位闪光态，
-      // 消除引爆瓶永久残影，并让下次引爆闪光正常记录新下标/新时长（F-01）
-      this.failFlashIdx = -1;
-      this.failDelay = 0;
+    } else {
+      // 失败态解除（0.6s 闪光窗口内撤销，或续杯加成）→ 复位门闩与闪光残影，
+      // 让下次引爆/失败正常记录新下标/新时长（B-01）
+      this.failLatch = false;
+      if (this.failFlashIdx >= 0 && !this.logic.isFailed()) {
+        this.failFlashIdx = -1;
+        this.failDelay = 0;
+      }
     }
 
     this.renderer.draw({

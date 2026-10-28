@@ -111,6 +111,9 @@ export function buildLevelsFromConfig(cfg) {
       // 炸弹瓶（PRD-玩法扩展 §2 B）：数量与倒计时步数（0 = 自动：生成时按解长 + 余量定，见 game.js _generate）
       bombCount: num(r.bombCount, num(defaults.bombCount, 0)),
       bombMoves: num(r.bombMoves, num(defaults.bombMoves, 0)),
+      // 限时 / 步数限制（PRD-限时与步数限制 §2）：秒 / 步，0 = 不限（校验见 _validateLimits）
+      timeLimit: num(r.timeLimit, num(defaults.timeLimit, 0)),
+      moveLimit: num(r.moveLimit, num(defaults.moveLimit, 0)),
       // 首入赠送（PRD-道具背包 §2 D）：可选字段原样透传，发放/防重与持久化在胶水层
       grant: r.grant ?? defaults.grant ?? null,
       // 最短步数（PRD-玩法扩展 §2 C 三星基准）：由 tools/solve-report.mjs 回填，原样透传
@@ -123,6 +126,7 @@ export function buildLevelsFromConfig(cfg) {
     _validateMix(lv, i);
     _validateCover(lv, i);
     _validateBomb(lv, i);
+    _validateLimits(lv, i);
     levels.push(lv);
   }
   return levels;
@@ -204,6 +208,39 @@ function _validateBomb(lv, level) {
 }
 
 /**
+ * 限时 / 步限参数校验（PRD-限时与步数限制 F-01/F-04）：
+ * - 非法值（非 ≥0 整数）→ 回退 0（不限）+ warn；
+ * - 显式配置违例按回填 par 放大（权威口径，运行时生效）：
+ *   moveLimit < par + 2 → 取 par + 2；timeLimit < max(60, par × 6) → 取 max(60, par × 6)，均 warn；
+ * - special bigBottle 关可叠加（用户拍板不强制清零）；mix 关清零见 _validateMix。
+ * 约束与生成管线（game.js _generate 重洗）双保险：解长 ≤ par 恒保证已放大关不触发重洗。
+ */
+function _validateLimits(lv, level) {
+  for (const [k, label] of [['timeLimit', 'timeLimit（秒）'], ['moveLimit', 'moveLimit（步）']]) {
+    if (!(Number.isInteger(lv[k]) && lv[k] >= 0)) {
+      console.warn(`[levels] L${level} ${lv[k]} 的 ${label} 非法（需 ≥0 整数，0=不限），回退 0`);
+      lv[k] = 0;
+    }
+  }
+  if (lv.par == null) return; // par 未回填（solve-report 之前）跳过约束放大
+  if (lv.moveLimit > 0 && lv.moveLimit < lv.par + 2) {
+    console.warn(
+      `[levels] L${level} moveLimit=${lv.moveLimit} < par(${lv.par})+2 违反可解性约束，放大为 ${lv.par + 2}`
+    );
+    lv.moveLimit = lv.par + 2;
+  }
+  if (lv.timeLimit > 0) {
+    const minT = Math.max(60, lv.par * 6);
+    if (lv.timeLimit < minT) {
+      console.warn(
+        `[levels] L${level} timeLimit=${lv.timeLimit} < max(60, par×6)=${minT} 违反可解性约束，放大为 ${minT}`
+      );
+      lv.timeLimit = minT;
+    }
+  }
+}
+
+/**
  * 混合容量关校验（PRD-混合容量瓶 §3，v1 不叠加）：
  * - mix 关强制 condLock/keyLock/hiddenCount 清零、noEmptyStart 强制 false（+ warn）；
  * - 剥离 special（v1 mix 与大瓶互斥，配置层双保险）；
@@ -222,6 +259,8 @@ function _validateMix(lv, level) {
     ['hiddenCount', '隐藏层'],
     ['coverCount', '遮盖'],
     ['bombCount', '炸弹'],
+    ['timeLimit', '限时'],
+    ['moveLimit', '步限'],
   ];
   for (const [k, label] of forceZero) {
     if (lv[k]) {

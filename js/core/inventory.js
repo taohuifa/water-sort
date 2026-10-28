@@ -1,14 +1,15 @@
 /**
- * 道具背包纯逻辑（PRD-玩法扩展 §2 D/E）：
- * 全局库存 {undo, shuffle, addBottle} 的默认值、存档清洗合并、首入发放叠加与扣减校验。
+ * 道具背包纯逻辑（PRD-玩法扩展 §2 D/E + PRD-限时与步数限制 F-10 续杯）：
+ * 全局库存 {undo, shuffle, addBottle, revive} 的默认值、存档清洗合并、首入发放叠加与扣减校验。
  * 纯函数、无状态、不依赖 wx（持久化读写与时机控制归 main.js 胶水层）。
  */
 
-export const PROP_KEYS = ['undo', 'shuffle', 'addBottle'];
+export const PROP_KEYS = ['undo', 'shuffle', 'addBottle', 'revive'];
 
-/** 初始存量（PRD 默认值：undo 3 / shuffle 1 / addBottle 1） */
+/** 初始存量（PRD 默认值：undo 3 / shuffle 1 / addBottle 1 / revive 1；
+ *  旧档缺 revive 字段经 mergeInventory 回退默认自动补 1，无需迁移） */
 export function defaultInventory() {
-  return { undo: 3, shuffle: 1, addBottle: 1 };
+  return { undo: 3, shuffle: 1, addBottle: 1, revive: 1 };
 }
 
 /**

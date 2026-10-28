@@ -1,6 +1,7 @@
 /**
  * 渲染层 + 入口冒烟测试（Node 运行，无需微信开发者工具）
  * 通过 wx / canvas 桩验证：模块加载、触摸交互（选中→倒水→撤回）、绘制主路径不抛错
+ * ▶ 何时跑我：改 renderer.js 任何视觉/布局/按钮、main.js 交互与浮层（tap/面板/广告）——UI 兜底，发布前必跑
  */
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
@@ -1248,7 +1249,7 @@ check('炸弹瓶：角标渲染 + 倒计时递减 + 失败弹窗链路 + 广告�
   main.tick(); // 绘制失败弹窗
   const failTexts = globalThis.__fillTexts.join('\n');
   assert.ok(failTexts.includes('炸弹爆炸了'), '失败弹窗标题文案');
-  assert.ok(failTexts.includes('复活'), '失败弹窗应含复活按钮');
+  assert.ok(failTexts.includes('续杯'), '失败弹窗应含续杯按钮（PRD-限时与步数限制 F-10）');
   assert.ok(failTexts.includes('重开本关'), '失败弹窗应含重开按钮');
 
   // 调试协议：bombs 摘要 + fail 状态 + btns 自描述
@@ -1264,20 +1265,27 @@ check('炸弹瓶：角标渲染 + 倒计时递减 + 失败弹窗链路 + 广告�
   assert.ok(Array.isArray(seen.state.bombs), 'bombs 应为数组');
   assert.strictEqual(seen.state.bombs[logic.bombBottles[k0]], 0, '已引爆炸弹摘要应为 0');
   assert.strictEqual(seen.state.fail, true, '失败态应写入协议');
+  assert.strictEqual(seen.state.failReason, 'bomb', '失败原因应写入协议（PRD-限时与步数限制 F-07）');
   assert.ok(seen.state.btns.fail_revive && seen.state.btns.fail_restart, 'btns 表应自描述失败弹窗按钮');
 
-  // 广告复活（开发模式直接发放）：undo×3 + 引信重置，背包 undo 账本不消耗
-  const invUndoBefore = main.inv.undo;
+  // 续杯统一复活（PRD-限时与步数限制 F-10，替代旧「undo×3 + 引信重置」）：
+  // 库存 0 → 广告确认浮层（补 1）→ 自动使用：消耗 revive、不回退局面、未拆除引信 +10 封顶初值
+  main.inv.revive = 0;
   const undoLenBeforeRevive = logic.undoStack.length;
+  const timersBeforeRevive = logic.bombTimers.slice();
   tap(renderer.failReviveBtn.x + renderer.failReviveBtn.w / 2, renderer.failReviveBtn.y + renderer.failReviveBtn.h / 2);
+  assert.strictEqual(main.adConfirm, 'revive', '续杯库存 0 应弹广告确认浮层');
+  tap(renderer.adConfirmWatchBtn.x + renderer.adConfirmWatchBtn.w / 2, renderer.adConfirmWatchBtn.y + renderer.adConfirmWatchBtn.h / 2);
+  assert.strictEqual(main.inv.revive, 0, '广告补 1 后应自动消耗使用');
   assert.ok(!main.failPanel, '复活后失败弹窗应关闭');
   assert.ok(!logic.isFailed(), '复活后应解除失败态');
   assert.ok(
-    logic.bombBottles.every((bi, k) => logic.bombDefused[k] || logic.bombTimers[k] === logic.bombMoves),
-    '未拆除炸弹引信应重置为初值'
+    logic.bombBottles.every(
+      (bi, k) => logic.bombDefused[k] || logic.bombTimers[k] === Math.min(timersBeforeRevive[k] + 10, logic.bombMoves)
+    ),
+    '未拆除引信应 +10（封顶各自初值）且 ≥ 1'
   );
-  assert.strictEqual(logic.undoStack.length, Math.max(0, undoLenBeforeRevive - 3), '复活应回退最多 3 步');
-  assert.strictEqual(main.inv.undo, invUndoBefore, '复活回退不消耗背包 undo 账本');
+  assert.strictEqual(logic.undoStack.length, undoLenBeforeRevive, '续杯不回退局面（undoStack 长度不变，语义变更）');
 
   // 再失败 → 重开本关
   logic.bombTimers[k0] = 1;

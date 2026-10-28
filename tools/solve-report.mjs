@@ -37,6 +37,8 @@ function fmtCfg(lv) {
   if (lv.keyLockCount) parts.push(`钥匙锁${lv.keyLockCount}`);
   if (lv.coverCount) parts.push(`遮盖${lv.coverCount}×${lv.coverLayers}`);
   if (lv.bombCount) parts.push(`炸弹${lv.bombCount}${lv.bombMoves ? `×${lv.bombMoves}` : ''}`);
+  if (lv.timeLimit) parts.push(`限时${lv.timeLimit}s`);
+  if (lv.moveLimit) parts.push(`步限${lv.moveLimit}`);
   if (lv.special === 'bigBottle') parts.push(`大瓶${lv.bigCapacity}`);
   return parts.join('/');
 }
@@ -277,6 +279,14 @@ for (const x of results) {
     }
     if (!x.lv.bombMoves && bm > 0) bombMovesByLevel.set(x.lv.level, bm);
   }
+  // 限时/步限约束校验（PRD-限时与步数限制 F-08，与炸弹约束同式；不回填，显式配置由 levels.js 运行时放大兜底）：
+  // par ≤ moveLimit − 2；timeLimit ≥ max(60, par × 6)
+  if (x.lv.moveLimit > 0 && x.par > x.lv.moveLimit - 2) {
+    console.warn(`[solve-report] L${x.lv.level} 步限约束违规：par=${x.par} > moveLimit(${x.lv.moveLimit}) - 2`);
+  }
+  if (x.lv.timeLimit > 0 && Math.max(60, x.par * 6) > x.lv.timeLimit) {
+    console.warn(`[solve-report] L${x.lv.level} 限时约束违规：max(60, par×6)=${Math.max(60, x.par * 6)} > timeLimit(${x.lv.timeLimit})`);
+  }
 }
 
 const stepsPct = pctRanks(results.map((x) => x.r.steps));
@@ -304,15 +314,15 @@ let md = `# 缤纷果汁铺 · 100 关解题报告
 
 ## 1. 总览表（按关卡顺序）
 
-| 关 | 配置 | par | 2★线 | 步数 | 搜索态 | 回溯 | 平均分支 | 最大分支 | 强制步 | 生成耗时 | 难度分 | 星级 | 难度排名 |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 关 | 配置 | par | 2★线 | 步限 | 限时 | 步数 | 搜索态 | 回溯 | 平均分支 | 最大分支 | 强制步 | 生成耗时 | 难度分 | 星级 | 难度排名 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 `;
 
 for (const x of results) {
   const lv = x.lv;
   const r = x.r;
   const parCell = x.parFallback ? `${x.par}†` : String(x.par);
-  md += `| L${lv.level} | ${fmtCfg(lv)} | ${parCell} | ${Math.ceil(x.par * 1.5)} | ${r.steps} | ${r.states} | ${r.backtracks} | ${r.avgBranch.toFixed(1)} | ${r.maxBranch} | ${r.forced} | ${r.loadMs}ms | ${x.difficulty.toFixed(2)} | ${stars(x.difficulty)} | ${rankOf.get(lv.level)} |\n`;
+  md += `| L${lv.level} | ${fmtCfg(lv)} | ${parCell} | ${Math.ceil(x.par * 1.5)} | ${lv.moveLimit || '—'} | ${lv.timeLimit ? lv.timeLimit + 's' : '—'} | ${r.steps} | ${r.states} | ${r.backtracks} | ${r.avgBranch.toFixed(1)} | ${r.maxBranch} | ${r.forced} | ${r.loadMs}ms | ${x.difficulty.toFixed(2)} | ${stars(x.difficulty)} | ${rankOf.get(lv.level)} |\n`;
 }
 
 md += `
@@ -404,10 +414,10 @@ const bf = backfillPar(readFileSync(cfgPath, 'utf8'), parByLevel, bombMovesByLev
 writeFileSync(cfgPath, bf.text, 'utf8');
 
 // ---------- 控制台摘要 ----------
-console.log('关 | 配置 | par | 2★线 | 步数 | 搜索态 | 回溯 | 均分支 | 强制步 | 难度分 | 排名');
+console.log('关 | 配置 | par | 2★线 | 步限 | 限时 | 步数 | 搜索态 | 回溯 | 均分支 | 强制步 | 难度分 | 排名');
 for (const x of results) {
   console.log(
-    `L${String(x.lv.level).padStart(2)} | ${fmtCfg(x.lv).padEnd(24)} | ${String(x.par).padStart(3)}${x.parFallback ? '†' : ' '} | ${String(Math.ceil(x.par * 1.5)).padStart(3)} | ${String(x.r.steps).padStart(3)} | ${String(x.r.states).padStart(5)} | ${String(x.r.backtracks).padStart(5)} | ${x.r.avgBranch.toFixed(1).padStart(5)} | ${String(x.r.forced).padStart(3)} | ${x.difficulty.toFixed(2)} | ${rankOf.get(x.lv.level)}`
+    `L${String(x.lv.level).padStart(2)} | ${fmtCfg(x.lv).padEnd(24)} | ${String(x.par).padStart(3)}${x.parFallback ? '†' : ' '} | ${String(Math.ceil(x.par * 1.5)).padStart(3)} | ${String(x.lv.moveLimit || '—').padStart(3)} | ${String(x.lv.timeLimit ? x.lv.timeLimit + 's' : '—').padStart(5)} | ${String(x.r.steps).padStart(3)} | ${String(x.r.states).padStart(5)} | ${String(x.r.backtracks).padStart(5)} | ${x.r.avgBranch.toFixed(1).padStart(5)} | ${String(x.r.forced).padStart(3)} | ${x.difficulty.toFixed(2)} | ${rankOf.get(x.lv.level)}`
   );
 }
 console.log(

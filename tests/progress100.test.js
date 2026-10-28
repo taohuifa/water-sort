@@ -1,6 +1,7 @@
 /**
  * 存档/解锁/发放/记星链路对关号 >30 的验证（PRD-100关扩充 F-03，headless wx storage mock）
  * 场景：老玩家已通 30 关 → 更新后 L31 解锁 → 首入发放章首 grant → 实际走通 L31 → 记星 + 进度 31
+ * ▶ 何时跑我：改关卡总数（levelCount）、main.js 进度/解锁/首入发放链路、levelSelect 对 >30 关号的行为
  */
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
@@ -80,10 +81,10 @@ test('P-01：老存档 cleared=30 → L31 解锁、L32 锁定，关卡总数 100
 });
 
 test('P-02：首入 L31 发放章首 grant（shuffle/addBottle 各 +1）并持久化，重复进入不重发', () => {
-  assert.deepStrictEqual(main.inv, { undo: 3, shuffle: 2, addBottle: 2 }, 'L31 章首关首入应发放');
+  assert.deepStrictEqual(main.inv, { undo: 3, shuffle: 2, addBottle: 2, revive: 1 }, 'L31 章首关首入应发放');
   assert.strictEqual(store.get('juicesort_granted')[31], true, '应持久化发放标记');
   main.loadLevel(30);
-  assert.deepStrictEqual(main.inv, { undo: 3, shuffle: 2, addBottle: 2 }, '重复进入不应重复发放');
+  assert.deepStrictEqual(main.inv, { undo: 3, shuffle: 2, addBottle: 2, revive: 1 }, '重复进入不应重复发放');
 });
 
 /** DFS 求解当前局面（L31 无锁无遮盖，启发式排序与 solveVerify 同源） */

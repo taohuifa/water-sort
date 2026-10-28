@@ -5,8 +5,16 @@
   "type": "module",
   "description": "缤纷果汁铺 JuiceSort —— 微信小游戏倒水排序（该文件仅供 Node 跑单测，不参与小游戏打包）",
   "scripts": {
-    "test": "node tests/game.test.js && node tests/inventory.test.js && node tests/stars.test.js && node tests/cover.test.js && node tests/bomb.test.js && node tests/progress100.test.js",
+    "test": "node tests/game.test.js && node tests/inventory.test.js && node tests/stars.test.js && node tests/cover.test.js && node tests/bomb.test.js && node tests/timelimit.test.js && node tests/progress100.test.js",
     "smoke": "node tests/smoke.render.test.js",
+    "test:game": "node tests/game.test.js",
+    "test:inventory": "node tests/inventory.test.js",
+    "test:stars": "node tests/stars.test.js",
+    "test:cover": "node tests/cover.test.js",
+    "test:bomb": "node tests/bomb.test.js",
+    "test:timelimit": "node tests/timelimit.test.js",
+    "test:progress": "node tests/progress100.test.js",
+    "test:smoke": "node tests/smoke.render.test.js",
     "mcp-smoke": "node tests/mcp-smoke.mjs"
   },
   "devDependencies": {

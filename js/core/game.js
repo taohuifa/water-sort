@@ -1,6 +1,12 @@
 import Rng from './rng.js';
 import { CAPACITY } from './levels.js';
 
+/** 续杯复活加成（PRD-限时与步数限制 §2 C）：时间 +60s / 步限上限 +10 / 炸弹引信 +10（封顶初值） */
+export const TIME_REVIVE_BONUS = 60;
+export const MOVE_REVIVE_BONUS = 10;
+// 炸弹引信加成与 MOVE_REVIVE_BONUS 当前同值，独立导出便于分开调参
+export const BOMB_REVIVE_BONUS = 10;
+
 /**
  * 纯逻辑层：瓶子数据结构、倒液规则、满瓶判定、撤回栈、关卡生成。
  * 不依赖 wx / canvas，可在 Node 下独立做单元测试。
@@ -42,6 +48,11 @@ export default class GameLogic {
     this.bombMoves = 0; // 倒计时初值（0 = 本关无炸弹）
     this.bombTimers = []; // 与 bombBottles 平行的剩余步数
     this.bombDefused = []; // 与 bombBottles 平行的拆除标记（倒空即永久拆除）
+    // 限时 / 步数限制（PRD-限时与步数限制 §2）：均为本关配置级资源，
+    // timeLeft 单向流动（不入 undoStack/快照，撤销不回退，PRD 拍板 5）；失败态/failReason 均为派生量
+    this.timeLimit = 0; // 本关时限秒（0 = 不限）
+    this.timeLeft = 0; // 剩余秒（浮点累计，tickTime(dt) 驱动；loadLevel 重置满值）
+    this.moveLimit = 0; // 步数上限（0 = 无限；续杯 +10 为上限抬升）
     this.lastGenSolLen = -1; // 最近一次生成接受局面的启发式解长（解长约束断言/工具回填用）
   }
 
@@ -64,12 +75,18 @@ export default class GameLogic {
     coverLayers = 2,
     bombCount = 0,
     bombMoves = 0,
+    timeLimit = 0, // 时限秒（0 = 不限，PRD-限时与步数限制 §2 A）
+    moveLimit = 0, // 步数上限（0 = 无限，§2 B）
     level = 0, // 关卡号（仅生成告警定位用，不参与生成逻辑）
   }) {
     this.capacity = capacity;
     this.maxBottles = maxBottles;
     this.colorCount = colors;
     this.noEmptyStart = noEmptyStart;
+    // 限时 / 步限（PRD-限时与步数限制）：随关卡载入重置（重开 = 满值重新起局）
+    this.timeLimit = timeLimit;
+    this.timeLeft = timeLimit;
+    this.moveLimit = moveLimit;
     this.special = special === 'bigBottle' ? 'bigBottle' : null;
     this.bigCapacity = this.special ? bigCapacity : 0;
     // 混合容量瓶（PRD-混合容量瓶）：v1 不与大瓶叠加（配置层强制，双保险）
@@ -102,6 +119,8 @@ export default class GameLogic {
         coverLayers,
         bombCount,
         bombMoves,
+        timeLimit,
+        moveLimit,
         level,
       });
     }
@@ -115,6 +134,9 @@ export default class GameLogic {
     this.bombMoves = this.bombBottles.length > 0 ? gen.bombMoves || 0 : 0;
     this.bombTimers = this.bombBottles.map(() => this.bombMoves);
     this.bombDefused = this.bombBottles.map(() => false);
+    // 生成兜底可能按解长放大限时/步限（见 _generate 兜底分支），以生成回传值为准；special/mix 管线无此字段
+    if (gen.timeLimit != null) this.timeLimit = this.timeLeft = gen.timeLimit;
+    if (gen.moveLimit != null) this.moveLimit = gen.moveLimit;
     this.unlocked = gen.locks.map(() => false);
     this._revealTops();
     this.completed = [];
@@ -146,6 +168,8 @@ export default class GameLogic {
       coverLayers = 2,
       bombCount = 0,
       bombMoves = 0,
+      timeLimit = 0,
+      moveLimit = 0,
       level = 0,
     } = opts;
     const nodeLimit = this.capacity >= 5 ? 200000 : 60000; // nodeLimit 随容量配置化（Q8=B）
@@ -230,12 +254,17 @@ export default class GameLogic {
       last = { bottles, locks, covers, bombs, bombMoves: 0 };
       // 带锁/带遮盖求解器验证局面必有解
       if (this._solvable(bottles, nodeLimit, null, lockInfo)) {
+        const solLen = Math.max(1, this._lastSolLen);
+        // 限时/步限解长约束（PRD-限时与步数限制 F-04，与炸弹解长约束同模式）：
+        // 解长 ≤ moveLimit − 2 且 解长 × 6 ≤ timeLimit，显式配置违例 → 换 seed 重洗。
+        // 配置层（levels.js _validateLimits）已按 par 放大的关：solLen ≤ par 恒不触发重洗（零扰动）
+        if (moveLimit > 0 && solLen > moveLimit - 2) continue;
+        if (timeLimit > 0 && solLen * 6 > timeLimit) continue;
         // 炸弹解长约束（PRD-玩法扩展 §2 B）：解长 ≤ bombMoves - 2（安全余量）。
         // 通关必清空所有瓶 → 可行解路径中途必不引爆，约束即完整约束，求解器无需建模引爆。
         // 胜利条件已由 _solvable 验证，此处用其启发式解长（par 上界）做廉价校准：
         let bm = bombMoves;
         if (bombCount > 0) {
-          const solLen = Math.max(1, this._lastSolLen);
           if (bm > 0) {
             if (solLen > bm - 2) continue; // 显式配置余量不足 → 换 seed 重洗
           } else {
@@ -256,6 +285,14 @@ export default class GameLogic {
     if (last.bombs.length > 0 && this._lastSolLen > 0) {
       bm = Math.max(bm, this._lastSolLen + 4);
     }
+    // 限时/步限兜底防御（同炸弹 F-06 模式）：解长约束未通过验证 → 按 solLen 放大（solLen 可得时），
+    // 保证兜底局面不违反「solLen ≤ moveLimit − 2 / solLen × 6 ≤ timeLimit」约束（0 = 不限的关不放大）
+    let genMoveLimit = moveLimit;
+    let genTimeLimit = timeLimit;
+    if (this._lastSolLen > 0) {
+      if (genMoveLimit > 0) genMoveLimit = Math.max(genMoveLimit, this._lastSolLen + 2);
+      if (genTimeLimit > 0) genTimeLimit = Math.max(genTimeLimit, this._lastSolLen * 6);
+    }
     return {
       bottles: last.bottles,
       locks: last.locks,
@@ -263,6 +300,8 @@ export default class GameLogic {
       covers: last.covers,
       bombs: last.bombs,
       bombMoves: bm,
+      moveLimit: genMoveLimit,
+      timeLimit: genTimeLimit,
     };
   }
 
@@ -791,14 +830,62 @@ export default class GameLogic {
   // ---------- 炸弹瓶（PRD-玩法扩展 §2 B） ----------
 
   /**
-   * 失败判定（派生量，不入快照）：任一未拆除炸弹倒计时归零 → 本关失败。
-   * undo 回退倒计时后自动解除（core 只置逻辑态，弹窗 UI 由胶水层接管）。
+   * 失败判定（派生量，不入快照）：时间归零 ∨ 步数达限 ∷ 任一未拆除炸弹倒计时归零 → 本关失败。
+   * undo 回退倒计时/步数后自动解除（时间单向流动不可解除，PRD 拍板 5）；core 只置逻辑态，弹窗 UI 由胶水层接管。
    */
   isFailed() {
+    if (this.timeLimit > 0 && this.timeLeft <= 0) return true;
+    if (this.moveLimit > 0 && this.moveCount >= this.moveLimit) return true;
     for (let k = 0; k < this.bombBottles.length; k++) {
       if (!this.bombDefused[k] && this.bombTimers[k] <= 0) return true;
     }
     return false;
+  }
+
+  /**
+   * 失败原因（派生 getter，PRD-限时与步数限制 F-07）：
+   * 'bomb' | 'moves' | 'time' | null（未失败）。同拍多机制优先级：炸弹 > 步数 > 时间——
+   * 炸弹与步限可在同一次 pour 同时触发，按更具体原因显示；时间单向流动，一旦归零恒失败，顺序无歧义。
+   */
+  get failReason() {
+    for (let k = 0; k < this.bombBottles.length; k++) {
+      if (!this.bombDefused[k] && this.bombTimers[k] <= 0) return 'bomb';
+    }
+    if (this.moveLimit > 0 && this.moveCount >= this.moveLimit) return 'moves';
+    if (this.timeLimit > 0 && this.timeLeft <= 0) return 'time';
+    return null;
+  }
+
+  /**
+   * 限时推进（PRD-限时与步数限制 F-02，纯逻辑）：由胶水层每帧喂 dt；浮层打开时胶水层停喂即暂停
+   * （core 无需感知暂停态）。时间不入 undoStack/快照，撤销不回退（单向流动）。
+   */
+  tickTime(dt) {
+    if (this.timeLimit <= 0 || this.timeLeft <= 0 || !(dt > 0)) return;
+    this.timeLeft = Math.max(0, this.timeLeft - dt);
+  }
+
+  /**
+   * 续杯复活加成（PRD-限时与步数限制 F-10 统一复活语义，替代旧「undo×3 + 引信重置」广告复活）：
+   * 按 failReason 补资源——time → timeLeft + 60；moves → moveLimit + 10（上限抬升，显示跟随）；
+   * bomb → 未拆除引信各 +10（封顶各自初值 bombMoves，加成走 BOMB_REVIVE_BONUS，与步限加成独立调参）。加成后失败条件自动解除（库存消耗归胶水层）。
+   * @returns {'bomb'|'moves'|'time'|null} 实际加成的失败原因（未失败时 null，调用方不应调用）
+   */
+  applyRevive() {
+    const reason = this.failReason;
+    if (reason === 'time') {
+      this.timeLeft += TIME_REVIVE_BONUS;
+    } else if (reason === 'moves') {
+      this.moveLimit += MOVE_REVIVE_BONUS;
+    } else if (reason === 'bomb') {
+      for (let k = 0; k < this.bombBottles.length; k++) {
+        if (!this.bombDefused[k]) {
+          // BOMB_REVIVE_BONUS 与 MOVE_REVIVE_BONUS 当前同值，独立调参
+          this.bombTimers[k] = Math.min(this.bombTimers[k] + BOMB_REVIVE_BONUS, this.bombMoves);
+        }
+      }
+    }
+    return reason;
   }
 
   /** 瓶 idx 的剩余引信步数（表现层/调试协议查询）；非炸弹瓶或已拆除 → -1 */
@@ -808,7 +895,8 @@ export default class GameLogic {
     return this.bombTimers[k];
   }
 
-  /** 广告复活用：所有未拆除炸弹倒计时重置为初值（拆除标记保留——拆除成果不回退） */
+  /** 未拆除炸弹倒计时重置为初值（拆除标记保留——拆除成果不回退）。
+   *  注：续杯统一复活语义（F-10）改用引信 +10 封顶（applyRevive），本方法仅测试/维护用途保留 */
   resetBombs() {
     for (let k = 0; k < this.bombBottles.length; k++) {
       if (!this.bombDefused[k]) this.bombTimers[k] = this.bombMoves;
@@ -1060,7 +1148,8 @@ export default class GameLogic {
   }
 
   /**
-   * 道具·打乱（选瓶模式）：只打乱指定瓶内的层序（隐藏层全部揭示）。
+   * 道具·打乱（选瓶模式）：只打乱指定瓶内层序（隐藏层全部揭示），按颜色段随机——
+   * 连续同色层作为整体参与排列，段内不拆散（打乱后不比分原状更碎，同色段可能合并）。
    * 与全场打乱不同，不校验全局可解性（玩家可用撤回兜底）。
    * 锁瓶不可选中；钥匙所在瓶在钥匙未倒出前不可选中（钥匙层位置元数据会失效）。
    * @returns {boolean} 是否成功（空瓶 / 纯色瓶 / 已收走的瓶 / 锁瓶 / 钥匙所在瓶无法打乱）
@@ -1080,14 +1169,22 @@ export default class GameLogic {
     if (revealed.every((c) => c === revealed[0])) return false; // 纯色瓶无需打乱
     const before = b.slice();
     const original = revealed.slice(); // 揭示后的原排列（比较基准，含隐藏层时 before 不适用）
-    for (let attempt = 0; attempt < 24; attempt++) {
-      for (let i = revealed.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [revealed[i], revealed[j]] = [revealed[j], revealed[i]];
-      }
-      if (revealed.some((c, i) => c !== original[i])) break; // 保证与原排列不同
+    // 按颜色段打乱：连续同色层为一段，只随机段间排列、段内层序不动（颜色保持连续不拆碎）
+    const segs = [];
+    for (const c of revealed) {
+      if (segs.length && segs[segs.length - 1][0] === c) segs[segs.length - 1].push(c);
+      else segs.push([c]);
     }
-    this.bottles[idx] = revealed;
+    let out = revealed;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      for (let i = segs.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [segs[i], segs[j]] = [segs[j], segs[i]];
+      }
+      out = segs.flat();
+      if (out.some((c, i) => c !== original[i])) break; // 保证与原排列不同
+    }
+    this.bottles[idx] = out;
     this.undoStack.push({ type: 'shuffleOne', idx, content: before });
     return true;
   }

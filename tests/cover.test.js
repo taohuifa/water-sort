@@ -2,6 +2,7 @@
  * 遮盖瓶逻辑层单元测试（Node 直接运行：node tests/cover.test.js）
  * 对应 PRD-玩法扩展 §2 A / F-02，实现文档 docs/design/PRD-玩法扩展-遮盖瓶-实现.md §8
  * 覆盖：配置解析与容错、生成结构（遮盖/锁/隐藏零重叠）、交互锁、解封时序、派生一致性、生成必有解
+ * ▶ 何时跑我：改 game.js 遮盖逻辑（coverLeft/isCovered/shuffleOne 冻结）、levels.js _validateCover、levels.json coverCount/coverLayers
  */
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';

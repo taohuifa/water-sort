@@ -4,6 +4,7 @@
  * 覆盖：配置解析与容错、生成结构（炸弹/锁/钥匙/遮盖/隐藏零重叠）、倒计时递减、倒空拆除、
  *       失败判定与冻结、undo 回退倒计时、快照一致性、生成解长约束、打乱适配
  * 注：T-07b 为慢用例（生成重洗耗尽 5s 预算），整体约 +5s。
+ * ▶ 何时跑我：改 game.js 炸弹逻辑（引信/拆除/failReason bomb 分支/applyRevive 炸弹加成）、levels.json bombCount/bombMoves
  */
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';

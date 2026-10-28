@@ -1,6 +1,7 @@
 /**
  * 逻辑层单元测试（Node 直接运行：npm test 或 node tests/game.test.js）
  * 覆盖：关卡生成合法性、倒液规则、连续倒、完成清空、撤回、死局、可解性（DFS 求解器）
+ * ▶ 何时跑我：改 js/core/game.js（生成/倒液/撤销/可解性）、js/core/levels.js、assets/config/levels.json 任意关卡配置
  */
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
@@ -59,6 +60,7 @@ test('assets/config/levels.json 可解析且含 v3 全部必需字段（defaults
   for (const k of [
     'colors', 'empties', 'capacity', 'hiddenCount', 'condLockCount', 'condLockNeed',
     'keyLockCount', 'noEmptyStart', 'mix', 'special', 'bigCapacity',
+    'timeLimit', 'moveLimit', // 限时/步限（PRD-限时与步数限制 F-01）
   ]) {
     assert.ok(k in DIFFICULTY_CURVE.defaults, `defaults 模板缺少字段 ${k}`);
   }
@@ -548,6 +550,31 @@ test('shuffleOne：空瓶 / 纯色瓶 / 已收走的瓶拒绝打乱', () => {
   assert.ok(!logic.shuffleOne(1), '纯色瓶不可打乱');
   assert.ok(!logic.shuffleOne(3), '已收走的瓶不可打乱');
   assert.ok(logic.shuffleOne(2), '多色瓶可打乱');
+});
+
+test('shuffleOne：按颜色段打乱——颜色分界数不增（同色段不被拆碎）', () => {
+  const logic = new GameLogic();
+  logic.colorCount = 3;
+  const original = [0, 0, 1, 2, 2, 2, 1, 1]; // 4 段：00 / 1 / 222 / 11
+  const boundaries = (arr) =>
+    arr.reduce((n, c, i) => (i > 0 && c !== arr[i - 1] ? n + 1 : n), 0);
+  for (let i = 0; i < 20; i++) {
+    logic.bottles = [original.slice(), []];
+    logic.undoStack.length = 0;
+    assert.ok(logic.shuffleOne(0), '多色瓶应可打乱');
+    const out = logic.bottles[0];
+    assert.strictEqual(
+      out.slice().sort((x, y) => x - y).join(','),
+      original.slice().sort((x, y) => x - y).join(','),
+      '层集合应不变'
+    );
+    assert.ok(
+      boundaries(out) <= boundaries(original),
+      `打乱不应增加颜色分界数（got ${boundaries(out)}）: ${out.join(',')}`
+    );
+    assert.notDeepStrictEqual(out, original, '层序应与原排列不同');
+    assert.ok(logic.undo());
+  }
 });
 
 console.log('== 道具：加瓶子 ==');

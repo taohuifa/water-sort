@@ -2,6 +2,7 @@
  * 三星步数评价单元测试（PRD-玩法扩展 F-05 / Node 直接运行：node tests/stars.test.js）
  * 覆盖：星级边界（=par / par+1 / ⌈par×1.5⌉）/ par 缺失兜底 / 存档更新规则（更优才更新）/
  * par 配置解析透传 / 通关结算存档链路（wx storage mock）/ 调试协议 v2 字段
+ * ▶ 何时跑我：改 js/core/stars.js、main.js 三星结算（_recordResult）、tools/solve-report.mjs par 回填
  */
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';

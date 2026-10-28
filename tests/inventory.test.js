@@ -1,6 +1,7 @@
 /**
  * 道具背包单元测试（PRD-玩法扩展 F-04 / Node 直接运行）
  * 覆盖：初始存量 / 存档清洗合并 / 首入发放一次性 / 扣减 / 耗尽广告补给 / grant 解析 / 持久化 mock
+ * ▶ 何时跑我：改 js/core/inventory.js、main.js 道具账本（_grantFirstEntry/resetProgress/续杯消耗）、levels.json grant 字段
  */
 import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
@@ -76,22 +77,23 @@ function test(name, fn) {
 
 console.log('== 背包纯函数（js/core/inventory.js） ==');
 
-test('T-01：初始存量 = {undo:3, shuffle:1, addBottle:1}', () => {
-  assert.deepStrictEqual(defaultInventory(), { undo: 3, shuffle: 1, addBottle: 1 });
-  assert.deepStrictEqual(PROP_KEYS, ['undo', 'shuffle', 'addBottle']);
+test('T-01：初始存量 = {undo:3, shuffle:1, addBottle:1, revive:1}', () => {
+  assert.deepStrictEqual(defaultInventory(), { undo: 3, shuffle: 1, addBottle: 1, revive: 1 });
+  assert.deepStrictEqual(PROP_KEYS, ['undo', 'shuffle', 'addBottle', 'revive']);
 });
 
-test('T-02：mergeInventory 容错 —— 空串/null/缺字段/负数/非整数/浮点均不炸且回退合法值', () => {
-  assert.deepStrictEqual(mergeInventory(''), { undo: 3, shuffle: 1, addBottle: 1 });
-  assert.deepStrictEqual(mergeInventory(null), { undo: 3, shuffle: 1, addBottle: 1 });
-  assert.deepStrictEqual(mergeInventory(undefined), { undo: 3, shuffle: 1, addBottle: 1 });
-  // 旧存档缺字段：缺省回默认，已有字段保留
-  assert.deepStrictEqual(mergeInventory({ undo: 7 }), { undo: 7, shuffle: 1, addBottle: 1 });
+test('T-02：mergeInventory 容错 —— 空串/null/缺字段/负数/非整数/浮点均不炸且回退合法值；旧档缺 revive 自动补 1', () => {
+  assert.deepStrictEqual(mergeInventory(''), { undo: 3, shuffle: 1, addBottle: 1, revive: 1 });
+  assert.deepStrictEqual(mergeInventory(null), { undo: 3, shuffle: 1, addBottle: 1, revive: 1 });
+  assert.deepStrictEqual(mergeInventory(undefined), { undo: 3, shuffle: 1, addBottle: 1, revive: 1 });
+  // 旧存档缺字段：缺省回默认（旧档无 revive → 自动补初始 1，F-10），已有字段保留
+  assert.deepStrictEqual(mergeInventory({ undo: 7 }), { undo: 7, shuffle: 1, addBottle: 1, revive: 1 });
   // 非法值剔除：负数 / 非整数 / 浮点 / 非数值
   assert.deepStrictEqual(mergeInventory({ undo: -2, shuffle: 1.5, addBottle: 'x' }), {
     undo: 3,
     shuffle: 1,
     addBottle: 1,
+    revive: 1,
   });
   // 不修改入参
   const saved = { undo: 5 };
@@ -105,13 +107,14 @@ test('T-03：applyGrant —— 正常叠加 / 非法字段忽略 / 0 与负数�
     undo: 3,
     shuffle: 2,
     addBottle: 2,
+    revive: 1,
   });
-  assert.deepStrictEqual(applyGrant(base, { undo: 2 }), { undo: 5, shuffle: 1, addBottle: 1 });
+  assert.deepStrictEqual(applyGrant(base, { undo: 2 }), { undo: 5, shuffle: 1, addBottle: 1, revive: 1 });
   assert.deepStrictEqual(applyGrant(base, null), base, 'grant 缺省应原样返回');
   assert.deepStrictEqual(applyGrant(base, 'x'), base, 'grant 非对象应原样返回');
   assert.deepStrictEqual(applyGrant(base, { undo: 0, shuffle: -1, addBottle: 1.5 }), base, '0/负/浮点不叠加');
   const out = applyGrant(base, { undo: 1 });
-  assert.deepStrictEqual(base, { undo: 3, shuffle: 1, addBottle: 1 }, '不应修改入参');
+  assert.deepStrictEqual(base, { undo: 3, shuffle: 1, addBottle: 1, revive: 1 }, '不应修改入参');
   assert.notStrictEqual(out, base);
 });
 
@@ -159,7 +162,7 @@ const tap = (x, y) => {
 };
 
 test('T-01b：新档初始库存 = 默认值（读档 merge，无写档）', () => {
-  assert.deepStrictEqual(main.inv, { undo: 3, shuffle: 1, addBottle: 1 });
+  assert.deepStrictEqual(main.inv, { undo: 3, shuffle: 1, addBottle: 1, revive: 1 });
   assert.deepStrictEqual(main.granted, {});
 });
 
@@ -169,12 +172,12 @@ test('T-04：首入发放 —— 首入 L1 发放并持久化 granted / inventor
   const p = center(renderer.levelBtns[0]);
   tap(p.x, p.y);
   assert.strictEqual(main.scene, 'game');
-  assert.deepStrictEqual(main.inv, { undo: 3, shuffle: 2, addBottle: 2 }, 'L1 首入应 shuffle/addBottle 各 +1');
+  assert.deepStrictEqual(main.inv, { undo: 3, shuffle: 2, addBottle: 2, revive: 1 }, 'L1 首入应 shuffle/addBottle 各 +1');
   assert.strictEqual(store.get('juicesort_granted')[1], true, '应持久化发放标记');
   assert.deepStrictEqual(store.get('juicesort_inventory'), main.inv, '应持久化背包');
   // 二次进入（重开同关 / 返回再进）不重复发
   main.loadLevel(0);
-  assert.deepStrictEqual(main.inv, { undo: 3, shuffle: 2, addBottle: 2 }, '重复进入不应重复发放');
+  assert.deepStrictEqual(main.inv, { undo: 3, shuffle: 2, addBottle: 2, revive: 1 }, '重复进入不应重复发放');
   assert.strictEqual(Object.keys(store.get('juicesort_granted')).length, 1);
 });
 
@@ -258,9 +261,9 @@ test('T-05b：打乱/加瓶消耗背包；耗尽转广告补给', () => {
 
 test('T-08：出厂废除 —— 无 grant 关进关不改变背包；库存跨关保持', () => {
   main.loadLevel(3); // L4：无 grant
-  assert.deepStrictEqual(main.inv, { undo: 0, shuffle: 1, addBottle: 1 }, '进关不应重置背包');
+  assert.deepStrictEqual(main.inv, { undo: 0, shuffle: 1, addBottle: 1, revive: 1 }, '进关不应重置背包');
   main.loadLevel(4); // L5：无 grant
-  assert.deepStrictEqual(main.inv, { undo: 0, shuffle: 1, addBottle: 1 });
+  assert.deepStrictEqual(main.inv, { undo: 0, shuffle: 1, addBottle: 1, revive: 1 });
 });
 
 test('T-04b：L11 首入发放（模拟已解锁）—— 发放一次、重复进入不再发', () => {
@@ -301,7 +304,7 @@ test('B-03：首入发放写序（先库存后标记，宁重发不吞发）+ �
   const main2 = new Main();
   assert.deepStrictEqual(main2.granted, { 31: true }, '新实例应读到持久化发放标记');
   main2.loadLevel(30); // L31 已发放关
-  assert.deepStrictEqual(main2.inv, { undo: 5, shuffle: 6, addBottle: 6 }, '冷启动重进已发放关不应改变库存');
+  assert.deepStrictEqual(main2.inv, { undo: 5, shuffle: 6, addBottle: 6, revive: 1 }, '冷启动重进已发放关不应改变库存');
   assert.strictEqual(main2.granted[31], true, '不应重发（标记保持）');
 });
 
@@ -311,22 +314,23 @@ test('B-04：重置进度清理赠送标记 —— reset 后章首关赠送可�
   store.set('juicesort_inventory', { undo: 3, shuffle: 4, addBottle: 4 });
   const m = new Main();
   m.loadLevel(30); // L31 章首关
-  assert.deepStrictEqual(m.inv, { undo: 3, shuffle: 4, addBottle: 4 }, '标记在档 → 不重发');
+  assert.deepStrictEqual(m.inv, { undo: 3, shuffle: 4, addBottle: 4, revive: 1 }, '标记在档 → 不重发');
   // 重置进度：granted 标记清空（内存 + 持久化），背包资产保留
   m.resetProgress();
   assert.deepStrictEqual(m.granted, {}, '重置进度应清空赠送标记（内存）');
   assert.strictEqual(store.has('juicesort_granted'), false, '重置进度应清除持久化赠送标记');
-  assert.deepStrictEqual(m.inv, { undo: 3, shuffle: 4, addBottle: 4 }, '背包资产保留');
+  assert.deepStrictEqual(m.inv, { undo: 3, shuffle: 4, addBottle: 4, revive: 1 }, '背包资产保留');
   // 重置后重新进入章首关 → 再次发放
   m.loadLevel(30);
-  assert.deepStrictEqual(m.inv, { undo: 3, shuffle: 5, addBottle: 5 }, '重置后章首关应重新发放');
+  assert.deepStrictEqual(m.inv, { undo: 3, shuffle: 5, addBottle: 5, revive: 1 }, '重置后章首关应重新发放');
   assert.strictEqual(store.get('juicesort_granted')[31], true, '重发后标记重新持久化');
 });
 
-test('调试协议：数量变化写入 __dbg_state（invUndo/invShuffle/invAddBottle）', () => {
+test('调试协议：数量变化写入 __dbg_state（invUndo/invShuffle/invAddBottle/invRevive）', () => {
   main.inv.undo = 9;
   main.inv.shuffle = 8;
   main.inv.addBottle = 7;
+  main.inv.revive = 6;
   main._dbgSig = ''; // 强制签名失配
   main._dbgTs = 0;
   main.syncDebugState();
@@ -335,6 +339,7 @@ test('调试协议：数量变化写入 __dbg_state（invUndo/invShuffle/invAddB
   assert.strictEqual(dbg.invUndo, 9);
   assert.strictEqual(dbg.invShuffle, 8);
   assert.strictEqual(dbg.invAddBottle, 7);
+  assert.strictEqual(dbg.invRevive, 6, '续杯库存应写入协议（PRD-限时与步数限制 F-07）');
 });
 
 /** 找一个合法倒法（当前局面） */
