@@ -1,5 +1,5 @@
 import GameLogic, { BOMB_REVIVE_BONUS, MOVE_REVIVE_BONUS, TIME_REVIVE_BONUS } from './core/game.js';
-import { buildLevelsFromConfig, parseJsonc, COLORS } from './core/levels.js';
+import { buildLevelsFromConfig, parseJsonc, COLORS, summarizeMechanics } from './core/levels.js';
 import Rng from './core/rng.js';
 import { applyGrant, canConsume, consume, mergeInventory } from './core/inventory.js';
 import { calcStars, mergeRecord, sanitizeRecord } from './core/stars.js';
@@ -55,6 +55,8 @@ const LEVEL_COUNT = LEVELS.length;
 const ADS_CONFIG = readConfig(ADS_CONFIG_PATH, { rewardedAdUnitId: '' });
 // 特殊关标记（关卡选择页角标用，S-09）
 const SPECIAL_FLAGS = LEVELS.map((l) => l.special === 'bigBottle');
+// 机制角标表（关卡选择页用，PRD-选关机制角标）：每关一个角标 key 数组
+const MECH_TAGS = LEVELS.map(summarizeMechanics);
 
 /**
  * 游戏入口：Canvas 初始化、屏幕适配、场景状态机（menu/settings/game）、
@@ -1008,6 +1010,7 @@ export default class Main {
       stuck: this.scene === 'game' && !this.logic.isFailed() && !this.logic.hasAnyMove(),
       bigIntro: this.bigIntro,
       specials: SPECIAL_FLAGS,
+      mechs: MECH_TAGS, // 机制角标表（PRD-选关机制角标；渲染层只读显示）
       // 生成进度（F-04 加载页进度条用；非 loading 场景为 0/0）
       genElapsedMs: this.scene === 'loading' && this.logic.genProgress() ? this.logic.genProgress().elapsedMs : 0,
       // 测试页沙盒瓶（PRD-标题图片化与渲染测试页 R3；渲染层只读显示）

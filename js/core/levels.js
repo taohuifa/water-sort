@@ -134,6 +134,28 @@ export function buildLevelsFromConfig(cfg) {
 }
 
 /**
+ * 机制角标汇总（PRD-选关机制角标 §2）：读合并后关卡配置，返回按优先级排序的
+ * 角标 key 数组（渲染层据此查样式表绘制，Node 可直测）。
+ * key：big 大瓶 / mix 混 / noEmpty 无空 / bomb 弹 / condLock 条锁 /
+ *      keyLock 钥锁 / cover 盖 / time 限时 / move 步限。
+ * hiddenCount（隐藏层，出现率高）与 capacity（轮换参数）不标（PRD §6 用户拍板）。
+ */
+export function summarizeMechanics(lv) {
+  const tags = [];
+  if (!lv) return tags;
+  if (lv.special === 'bigBottle') tags.push('big');
+  if (lv.mix) tags.push('mix');
+  if (lv.noEmptyStart) tags.push('noEmpty');
+  if (lv.bombCount > 0) tags.push('bomb');
+  if (lv.condLockCount > 0) tags.push('condLock');
+  if (lv.keyLockCount > 0) tags.push('keyLock');
+  if (lv.coverCount > 0) tags.push('cover');
+  if (lv.timeLimit > 0) tags.push('time');
+  if (lv.moveLimit > 0) tags.push('move');
+  return tags;
+}
+
+/**
  * 特殊关（v1 仅 bigBottle）配置校验（PRD §2.1，S-01）：
  * - bigCapacity 非法（缺省 / 非整数 / 小于普通瓶容量）→ 剥离 special 字段回退普通关 + warn；
  * - 合法则强制 hiddenCount/condLockCount/keyLockCount/noEmptyStart 清零（v1 不叠加，

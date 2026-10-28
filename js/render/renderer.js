@@ -10,6 +10,20 @@ const BOTTLE_TOP_FRAC = 0.32; // 三段式：瓶口段（唇边+颈+肩）占素
 const BOTTLE_BOT_FRAC = 0.12; // 三段式：圆底段占素材高比例
 export const BOTTLE_ASPECT = 2.0; // 瓶形高宽比（矮胖奶瓶体态；容量伸缩公式在此基准上 ±11%/层）
 
+// 机制角标样式表（PRD-选关机制角标 §2）：key 由 core/levels.js summarizeMechanics 产出
+const MECH_TAG_STYLE = {
+  big: { text: '大瓶', color: '#5B8DEF' },
+  mix: { text: '混', color: '#2FA36B' },
+  noEmpty: { text: '无空', color: '#7A6A58' },
+  bomb: { text: '弹', color: '#E04B4B' },
+  condLock: { text: '条锁', color: '#E07B2A' },
+  keyLock: { text: '钥锁', color: '#C9A227' },
+  cover: { text: '盖', color: '#4A90D9' },
+  time: { text: '限时', color: '#D45BA2' },
+  move: { text: '步限', color: '#B0703A' },
+};
+const MECH_TAG_MAX = 3; // 每卡最多显示角标数，超出显「+N」
+
 // 背景适配：各图顶部/底部装饰带占素材高比例（装饰带原比例固定，仅中间纯色墙面垂直伸缩；
 // null = 整页边框图，走高度等比适配 + 两侧边缘补边）。素材 750x1624，按实际装饰区标定。
 const BG_FIT_FRAC = {
@@ -1012,13 +1026,37 @@ export default class Renderer {
         ctx.fillText('挑战', x + cardW - 12, y + cardH / 2);
       }
       // 已获星数（PRD-三星评价；纯文本，只读 state.best，锁定卡与无纪录卡不显示）
+      // 有机制角标时星数移至右下角，为角标行让位（PRD-选关机制角标 §3）
       const rec = state.best && state.best[i + 1];
+      const tags = (state.mechs && state.mechs[i]) || [];
       if (unlocked && rec && rec.stars) {
-        ctx.textAlign = 'center';
+        ctx.textAlign = tags.length ? 'right' : 'center';
         ctx.fillStyle = '#F5A623';
         ctx.font = 'bold 11px sans-serif';
-        ctx.fillText('★'.repeat(rec.stars) + '☆'.repeat(3 - rec.stars), x + cardW / 2, y + cardH - 8);
+        ctx.fillText('★'.repeat(rec.stars) + '☆'.repeat(3 - rec.stars), tags.length ? x + cardW - 10 : x + cardW / 2, y + cardH - 8);
         ctx.textAlign = 'right';
+      }
+      // 机制角标（PRD-选关机制角标 §2/§3）：底部左侧小圆角色块 + 白字，最多 3 个 + 「+N」
+      if (tags.length) {
+        const shown = tags.slice(0, MECH_TAG_MAX);
+        const extra = tags.length - shown.length;
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        let tx = x + 10;
+        const cy = y + cardH - 13;
+        const drawChip = (label, color) => {
+          const w = label.length * 9 + 6; // 9px 字号下 CJK 字宽 ≈ 9（不用 measureText，兼容测试桩）
+          ctx.fillStyle = !unlocked ? 'rgba(176,158,130,0.6)' : color;
+          this.rr(tx, cy - 6.5, w, 13, 6);
+          ctx.fill();
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillText(label, tx + w / 2, cy);
+          tx += w + 3;
+        };
+        for (const t of shown) drawChip(MECH_TAG_STYLE[t].text, MECH_TAG_STYLE[t].color);
+        if (extra > 0) drawChip('+' + extra, '#B0A692');
+        ctx.textBaseline = 'alphabetic';
       }
       ctx.textBaseline = 'alphabetic';
       ctx.restore(); // 卡片按下态变换收束
