@@ -10,6 +10,15 @@ const BOTTLE_TOP_FRAC = 0.32; // 三段式：瓶口段（唇边+颈+肩）占素
 const BOTTLE_BOT_FRAC = 0.12; // 三段式：圆底段占素材高比例
 export const BOTTLE_ASPECT = 2.0; // 瓶形高宽比（矮胖奶瓶体态；容量伸缩公式在此基准上 ±11%/层）
 
+// 背景适配：各图顶部/底部装饰带占素材高比例（装饰带原比例固定，仅中间纯色墙面垂直伸缩；
+// null = 整页边框图，走高度等比适配 + 两侧边缘补边）。素材 750x1624，按实际装饰区标定。
+const BG_FIT_FRAC = {
+  bg: { top: 0.25, bottom: 0.27 }, // 彩旗+吊兰+窗户 / 吧台+饮品机
+  bgMenu: { top: 0.32, bottom: 0.38 }, // 遮阳篷+云+太阳 / 水果箱+吧台
+  bgLevels: null, // 整页边框（四周水果链）
+  bgSettings: { top: 0.09, bottom: 0.14 }, // 彩旗 / 底部水果行
+};
+
 export default class Renderer {
   constructor(ctx, screenW, screenH) {
     this.ctx = ctx;
@@ -1108,11 +1117,31 @@ export default class Renderer {
     const key = { menu: 'bgMenu', levelSelect: 'bgLevels', settings: 'bgSettings' }[scene] || 'bg';
     const bg = this.images[key];
     if (bg) {
-      // cover 铺满：等比缩放居中裁切
-      const s = Math.max(this.W / bg.width, this.H / bg.height);
-      const dw = bg.width * s;
-      const dh = bg.height * s;
-      ctx.drawImage(bg, (this.W - dw) / 2, (this.H - dh) / 2, dw, dh);
+      const fit = BG_FIT_FRAC[key]; // { top, bottom } = 该图顶部/底部装饰带占素材高的比例
+      if (fit) {
+        // 宽度等比铺满 + 三明治高度自适应：顶/底装饰带原比例固定（贴顶/贴底，不变形不裁切），
+        // 仅中间近乎纯色的墙面带垂直伸缩补满屏高（纯色伸缩无形变感）
+        const s = this.W / bg.width;
+        const dw = this.W;
+        const topH = bg.height * fit.top * s;
+        const botH = bg.height * fit.bottom * s;
+        ctx.drawImage(bg, 0, 0, bg.width, bg.height * fit.top, 0, 0, dw, topH);
+        const fillH = Math.max(this.H - topH - botH, 0);
+        if (fillH > 0) {
+          ctx.drawImage(bg, 0, bg.height * fit.top, bg.width, bg.height * (1 - fit.top - fit.bottom), 0, topH, dw, fillH);
+        }
+        ctx.drawImage(bg, 0, bg.height * (1 - fit.bottom), bg.width, bg.height * fit.bottom, 0, this.H - botH, dw, botH);
+      } else {
+        // 整页边框图（关卡选择页）：高度等比适配零形变，两侧缝隙用边缘列拉伸补齐（同色无缝）
+        const s = this.H / bg.height;
+        const dw = bg.width * s;
+        const dx = (this.W - dw) / 2;
+        if (dx > 0) {
+          ctx.drawImage(bg, 0, 0, 1, bg.height, 0, 0, dx, this.H);
+          ctx.drawImage(bg, bg.width - 1, 0, 1, bg.height, dx + dw, 0, this.W - dx - dw, this.H);
+        }
+        ctx.drawImage(bg, dx, 0, dw, this.H);
+      }
       return;
     }
     // 降级：渐变背景 + 顶部装饰横幅
