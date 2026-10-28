@@ -9,7 +9,6 @@ import Rng from '../core/rng.js';
 const BOTTLE_TOP_FRAC = 0.32; // 三段式：瓶口段（唇边+颈+肩）占素材高比例
 const BOTTLE_BOT_FRAC = 0.12; // 三段式：圆底段占素材高比例
 export const BOTTLE_ASPECT = 2.0; // 瓶形高宽比（矮胖奶瓶体态；容量伸缩公式在此基准上 ±11%/层）
-const BOTTLE_ASPECT_FLOOR = 1.6; // 混合关最矮瓶的瓶形下限（矮于基准：压低液体层厚与瓶身高度）
 
 export default class Renderer {
   constructor(ctx, screenW, screenH) {
@@ -190,7 +189,7 @@ export default class Renderer {
     this.bigCapacity = bigIdx >= 0 ? bigCapacity : 0;
     this.caps = caps; // 每瓶容量（混合关；null = 均一容量）
     const n = bottleCount;
-    const margin = 18;
+    const margin = 12; // 页边距收紧，瓶子整体放大
     const gapX = 12;
     const gapY = 48; // 行距（含散布纵向抖动 ±22px 的余量，保证行间不重叠）
     const playTop = 252;
@@ -334,66 +333,33 @@ export default class Renderer {
       return;
     }
 
-    // 混合容量关（PRD-混合容量瓶 §4.3）：统一层厚、同宽、行内底对齐（试管架）。
-    // 瓶高 = 容量 × 统一层厚；行高 = 行内最大容量 × 层厚；高度超预算时按比例缩瓶宽
-    // （瓶形 1:aspect 不变，与普通关压缩口径一致）。
-    if (caps && caps.length === bottleCount) {
-      const cols = Math.max(2, Math.ceil(n / 2));
-      const rows = Math.ceil(n / cols);
-      const aspect = BOTTLE_ASPECT * (1 + (capacity - 4) * 0.11);
-      let bw = Math.min(76, (availW - (cols - 1) * (gapX + 16)) / cols); // 宽上限 76：行数少时瓶放大填棋盘（行宽约束兜底），并预留散布缝隙余量
-      const rowMax = [];
-      for (let r = 0; r < rows; r++) {
-        let m = 1;
-        for (let c = 0; c < cols && r * cols + c < n; c++) m = Math.max(m, caps[r * cols + c]);
-        rowMax.push(m);
-      }
-      const sumRowMax = rowMax.reduce((s, m) => s + m, 0);
-      // 瓶口/瓶底段按宽等比固定（截距 C = k×bw），布局把 C 补进瓶高：
-      // 瓶高 = 容量×统一层厚 + C → 液体内高 ∝ 容量，层厚全局一致且瓶底同一水平线对齐。
-      // 层厚下限：最小容量瓶的瓶形不得矮于 BOTTLE_ASPECT，否则其瓶口截距占比过大、短瓶蹲胖变形
-      const sprite = this.images.bottle;
-      const sprAspect = sprite && sprite.width ? sprite.height / sprite.width : 0;
-      const k = sprAspect * (BOTTLE_TOP_FRAC + 0.4 * BOTTLE_BOT_FRAC); // 瓶口 + 0.4×圆底 截距系数
-      const capFloor = Math.min(capacity, ...caps);
-      const bwNeed =
-        (availH - (rows - 1) * gapY) /
-        (((BOTTLE_ASPECT_FLOOR - k) * sumRowMax) / capFloor + rows * k);
-      bw = Math.max(16, Math.min(bw, bwNeed));
-      const unitH = (bw * (BOTTLE_ASPECT_FLOOR - k)) / capFloor; // 统一层厚（全关一致，含截距下限口径）
-      const rowHs = rowMax.map((m) => m * unitH + k * bw);
-      const gridH = rowHs.reduce((s, h) => s + h, 0) + (rows - 1) * gapY;
-      const startY = playTop + (availH - gridH) / 2;
-      // 离散散布：行内瓶距随机（rng 可复现）+ 每瓶纵向抖动（±22px < 行距 48px，钳制安全区保证不重叠）
-      const rng = new Rng((seed ^ 0x5f3759df) >>> 0);
-      let yBase = startY;
-      for (let r = 0; r < rows; r++) {
-        const rowBottom = yBase + rowHs[r]; // 行基线（行底）
-        const m = Math.min(cols, n - r * cols);
-        const xs = this._scatterRowXs(m, bw, availW, rng);
-        for (let c = 0; c < m; c++) {
-          const i = r * cols + c;
-          const hi = unitH * caps[i] + k * bw; // 瓶高含瓶口/圆底截距补偿（与 rowHs 同口径，保证层厚一致）
-          const dy = (rng.next() * 2 - 1) * 22;
-          const yy = Math.max(playTop, Math.min(rowBottom - hi + dy, playBottom - hi)); // 安全区钳制
-          this.bottleRects[i] = { x: xs[c], y: yy, w: bw, h: hi };
-        }
-        yBase = rowBottom + gapY;
-      }
-      return;
-    }
+    // 混合容量关与普通关同布局：每关内瓶子统一尺寸（大小一致），液体按各自容量在瓶内分层。
+    // （旧「瓶高 ∝ 容量」口径已废除；caps 仅在绘制层高时经 bottleCap 生效）
 
-    const cols = Math.max(2, Math.ceil(n / 2));
+    // 列数自适应：候选 2..⌈n/2⌉ 中选「瓶宽×瓶高」最大的列数——
+    // 宽约束（含散布余量）与高约束（行数×瓶高 + 行距 ≤ 棋盘高）取小，
+    // 瓶子尽量撑满棋盘（宽排/密排自动择优），瓶形 1:aspect 保持不变
+    const aspect = BOTTLE_ASPECT * (1 + (capacity - 4) * 0.11);
+    let cols = 2;
+    let bw = 16;
+    let bh = bw * aspect;
+    for (let c = 2, cMax = Math.max(2, Math.ceil(n / 2)); c <= cMax; c++) {
+      const rowsC = Math.ceil(n / c);
+      let w = Math.min(76, (availW - (c - 1) * (gapX + 8)) / c);
+      let h = w * aspect;
+      const needH = rowsC * h + (rowsC - 1) * gapY;
+      if (needH > availH) {
+        h = (availH - (rowsC - 1) * gapY) / rowsC;
+        w = h / aspect;
+      }
+      w = Math.max(16, w);
+      if (w * h > bw * bh) {
+        cols = c;
+        bw = w;
+        bh = h;
+      }
+    }
     const rows = Math.ceil(n / cols);
-
-    const aspect = BOTTLE_ASPECT * (1 + (capacity - 4) * 0.11); // 瓶高随容量伸缩，画布安全区由下方压缩逻辑 clamp
-    let bw = Math.min(76, (availW - (cols - 1) * (gapX + 16)) / cols); // 宽上限 76：行数少时瓶放大填棋盘（行宽约束兜底），并预留散布缝隙余量
-    let bh = bw * aspect; // 矮胖奶瓶瓶形（BOTTLE_ASPECT 基准）
-    const needH = rows * bh + (rows - 1) * gapY;
-    if (needH > availH) {
-      bh = (availH - (rows - 1) * gapY) / rows;
-      bw = bh / aspect;
-    }
     const gridH = rows * bh + (rows - 1) * gapY;
     const startY = playTop + (availH - gridH) / 2;
 
@@ -1687,7 +1653,7 @@ export default class Renderer {
   drawBombBadge(rect, left) {
     const { ctx } = this;
     const cx = rect.x + rect.w / 2;
-    const cy = rect.y - 4; // 底板下沿压住瓶口（与锁瓶角标同位口径）
+    const cy = rect.y - 14; // 悬挂在瓶口上方（与锁瓶角标同位口径），不遮挡瓶口
     const bw = Math.max(40, Math.min(56, rect.w + 18));
     const bx = cx - bw / 2;
     const urgent = left <= 2;
@@ -1825,7 +1791,7 @@ export default class Renderer {
   drawCondLockBadge(rect, done, need) {
     const { ctx } = this;
     const cx = rect.x + rect.w / 2;
-    const cy = rect.y - 4; // 底板下沿压住瓶口：贴合瓶口悬挂，不再悬浮脱节
+    const cy = rect.y - 14; // 悬挂在瓶口上方（底板下沿留 4px 间隙），不遮挡瓶口
     const bw = Math.max(40, Math.min(52, rect.w + 14)); // 底板宽随瓶宽自适应，窄瓶不横向溢出
     const bx = cx - bw / 2;
     ctx.save();
@@ -1856,7 +1822,7 @@ export default class Renderer {
   drawKeyLockBadge(rect) {
     const { ctx } = this;
     const cx = rect.x + rect.w / 2;
-    const cy = rect.y - 4; // 底板下沿压住瓶口：贴合瓶口悬挂，不再悬浮脱节
+    const cy = rect.y - 14; // 悬挂在瓶口上方（底板下沿留 4px 间隙），不遮挡瓶口
     const bw = Math.max(40, Math.min(52, rect.w + 14)); // 底板宽随瓶宽自适应，窄瓶不横向溢出
     const bx = cx - bw / 2;
     ctx.save();
@@ -1881,7 +1847,7 @@ export default class Renderer {
   drawCompleteBadge(rect, t) {
     const { ctx } = this;
     const cx = rect.x + rect.w / 2;
-    const cy = rect.y + rect.h * 0.16; // 瓶口/瓶颈区域
+    const cy = rect.y - 18; // 悬挂在瓶口上方，不遮挡瓶口
     // easeOutBack 弹出（轻微过冲回弹）
     const c1 = 1.70158;
     const c3 = c1 + 1;

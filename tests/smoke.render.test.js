@@ -859,13 +859,21 @@ check('混合容量关渲染：第 11 关（原 L26）底对齐、瓶高 ∝ 容
   assert.strictEqual(logic.caps.length, logic.bottles.length, 'caps 与 bottles 平行');
   assert.ok(logic.caps.some((c) => c !== logic.capacity), '容量应存在 3~5 混合');
 
-  const aspectFloor = 1.6; // 混合关瓶形下限（与 renderer BOTTLE_ASPECT_FLOOR 同口径）
-  const capFloor = Math.min(logic.capacity, ...logic.caps); // 层厚下限口径（最矮瓶形不矮于下限比例）
+  const aspect = BOTTLE_ASPECT * (1 + (logic.capacity - 4) * 0.11);
+  let refW = null;
+  let refH = null;
   for (let i = 0; i < logic.bottles.length; i++) {
     const r = renderer.bottleRects[i];
     assert.ok(r && r.h > 0, `瓶 ${i} 应有布局`);
-    // 同宽 + 瓶高 ∝ 容量（统一层厚，测试桩无贴图截距 k=0）
-    assert.ok(Math.abs(r.h / r.w - (aspectFloor * logic.caps[i]) / capFloor) < 0.4, `瓶 ${i} 高宽比应 ∝ 容量`);
+    // 同关瓶尺寸一致（大小统一，容量差异只体现在液体层数）
+    if (refW === null) {
+      refW = r.w;
+      refH = r.h;
+    } else {
+      assert.strictEqual(r.w, refW, `瓶 ${i} 宽应与其余瓶一致`);
+      assert.strictEqual(r.h, refH, `瓶 ${i} 高应与其余瓶一致`);
+    }
+    assert.ok(Math.abs(r.h / r.w - aspect) < 0.4, `瓶 ${i} 高宽比应符合瓶形基准`);
     assert.strictEqual(logic.bottles[i].length <= logic.caps[i], true, `瓶 ${i} 层数不超容量`);
   }
   // 行内近似底对齐：散布纵向抖动 ±22px（F-散布布局），排内瓶底差 ≤ 44px
@@ -885,13 +893,6 @@ check('混合容量关渲染：第 11 关（原 L26）底对齐、瓶高 ∝ 容
     const snapshot = JSON.stringify(renderer.bottleRects);
     main.refreshBoard();
     assert.strictEqual(JSON.stringify(renderer.bottleRects), snapshot, '散布布局应随 seed 复现');
-  }
-  // 层厚全局一致：测试桩无贴图（截距补偿 k=0），层高 = 瓶高 / 容量，跨容量必须相等
-  // （真机口径：瓶高 = 容量×层厚 + 截距C，液体内高 ∝ 容量，同归此断言意图）
-  {
-    const layerHs = logic.caps.map((c, i) => renderer.bottleRects[i].h / c);
-    const spread = Math.max(...layerHs) - Math.min(...layerHs);
-    assert.ok(spread < 0.5, `混合关各瓶层厚应一致（最大差 ${spread.toFixed(2)}px）`);
   }
   assertBottlesInSafeArea();
   main.tick(); // 绘制主路径不抛错
