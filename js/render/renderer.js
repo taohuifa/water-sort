@@ -7,6 +7,8 @@ import { COLORS } from '../core/levels.js';
  */
 const BOTTLE_TOP_FRAC = 0.32; // 三段式：瓶口段（唇边+颈+肩）占素材高比例
 const BOTTLE_BOT_FRAC = 0.12; // 三段式：圆底段占素材高比例
+export const BOTTLE_ASPECT = 2.0; // 瓶形高宽比（矮胖奶瓶体态；容量伸缩公式在此基准上 ±11%/层）
+const BOTTLE_ASPECT_FLOOR = 1.6; // 混合关最矮瓶的瓶形下限（矮于基准：压低液体层厚与瓶身高度）
 
 export default class Renderer {
   constructor(ctx, screenW, screenH) {
@@ -188,7 +190,7 @@ export default class Renderer {
     const n = bottleCount;
     const margin = 18;
     const gapX = 12;
-    const gapY = 30;
+    const gapY = 20;
     const playTop = 252;
     const playBottom = this.H - 128;
     const availW = this.W - margin * 2;
@@ -201,14 +203,14 @@ export default class Renderer {
       const topCount = Math.max(1, Math.ceil(normals / 2));
       const botCount = normals - topCount;
       const cols = Math.max(topCount, botCount, 1);
-      const aspectN = 3.0 * (1 + (capacity - 4) * 0.11);
+      const aspectN = BOTTLE_ASPECT * (1 + (capacity - 4) * 0.11);
       // 竖向预算（特殊关专属收紧，普通关不受影响）：上界贴近货架、下界贴近按钮排
       const sTop = 248;
       const sBottom = this.H - 116;
       const sAvailH = sBottom - sTop;
       const vGap = 14; // 上排/大瓶/下排之间的行距（比普通关 30 紧，换取瓶宽）
-      // 宽度约束：行内不越界（含 48px 常规上限）；大瓶宽由高度反推（天然 1:3 比例），仅需防越界
-      const wCap = Math.min(48, (availW - (cols - 1) * gapX) / cols);
+      // 宽度约束：行内不越界（含 60px 常规上限）；大瓶宽由高度反推（瓶形 1:BOTTLE_ASPECT 比例），仅需防越界
+      const wCap = Math.min(60, (availW - (cols - 1) * gapX) / cols);
       // 高度约束（统一层厚：大瓶层厚 = 普通瓶层厚，bigH = bigCap/cap × bh）：
       // 上排 bh + vGap + bigH + vGap + 下排 bh ≤ sAvailH
       const bigRows = bigCapacity / capacity; // 大瓶折算普通瓶高的倍数
@@ -216,8 +218,8 @@ export default class Renderer {
       const bw = Math.max(20, Math.min(wCap, hCap));
       const bh = bw * aspectN;
       const bigH = bigRows * bh;
-      // 大瓶宽度按玻璃贴图天然比例 1:3 由高度反推（固定倍数会在不同容量下拉伸变形）
-      const bigW = Math.min(bigH / 3, availW);
+      // 大瓶宽度按玻璃贴图瓶形比例 1:BOTTLE_ASPECT 由高度反推（固定倍数会在不同容量下拉伸变形）
+      const bigW = Math.min(bigH / BOTTLE_ASPECT, availW);
       const totalH = 2 * bh + 2 * vGap + bigH;
       const startY = sTop + (sAvailH - totalH) / 2;
       let k = 0;
@@ -241,8 +243,8 @@ export default class Renderer {
     if (caps && caps.length === bottleCount) {
       const cols = Math.max(2, Math.ceil(n / 2));
       const rows = Math.ceil(n / cols);
-      const aspect = 3.0 * (1 + (capacity - 4) * 0.11);
-      let bw = Math.min(48, (availW - (cols - 1) * gapX) / cols);
+      const aspect = BOTTLE_ASPECT * (1 + (capacity - 4) * 0.11);
+      let bw = Math.min(60, (availW - (cols - 1) * gapX) / cols);
       const rowMax = [];
       for (let r = 0; r < rows; r++) {
         let m = 1;
@@ -250,10 +252,19 @@ export default class Renderer {
         rowMax.push(m);
       }
       const sumRowMax = rowMax.reduce((s, m) => s + m, 0);
-      const bwNeed = ((availH - (rows - 1) * gapY) * capacity) / (aspect * sumRowMax);
+      // 瓶口/瓶底段按宽等比固定（截距 C = k×bw），布局把 C 补进瓶高：
+      // 瓶高 = 容量×统一层厚 + C → 液体内高 ∝ 容量，层厚全局一致且瓶底同一水平线对齐。
+      // 层厚下限：最小容量瓶的瓶形不得矮于 BOTTLE_ASPECT，否则其瓶口截距占比过大、短瓶蹲胖变形
+      const sprite = this.images.bottle;
+      const sprAspect = sprite && sprite.width ? sprite.height / sprite.width : 0;
+      const k = sprAspect * (BOTTLE_TOP_FRAC + 0.4 * BOTTLE_BOT_FRAC); // 瓶口 + 0.4×圆底 截距系数
+      const capFloor = Math.min(capacity, ...caps);
+      const bwNeed =
+        (availH - (rows - 1) * gapY) /
+        (((BOTTLE_ASPECT_FLOOR - k) * sumRowMax) / capFloor + rows * k);
       bw = Math.max(16, Math.min(bw, bwNeed));
-      const unitH = (bw * aspect) / capacity; // 统一层厚（与普通关同瓶形口径）
-      const rowHs = rowMax.map((m) => m * unitH);
+      const unitH = (bw * (BOTTLE_ASPECT_FLOOR - k)) / capFloor; // 统一层厚（全关一致，含截距下限口径）
+      const rowHs = rowMax.map((m) => m * unitH + k * bw);
       const gridH = rowHs.reduce((s, h) => s + h, 0) + (rows - 1) * gapY;
       const gridW = cols * bw + (cols - 1) * gapX;
       const startX = (this.W - gridW) / 2;
@@ -263,7 +274,7 @@ export default class Renderer {
         const rowBottom = yBase + rowHs[r]; // 行基线（行底），行内底对齐
         for (let c = 0; c < cols && r * cols + c < n; c++) {
           const i = r * cols + c;
-          const hi = unitH * caps[i];
+          const hi = unitH * caps[i] + k * bw; // 瓶高含瓶口/圆底截距补偿（与 rowHs 同口径，保证底对齐与层厚一致）
           this.bottleRects[i] = { x: startX + c * (bw + gapX), y: rowBottom - hi, w: bw, h: hi };
         }
         yBase = rowBottom + gapY;
@@ -274,9 +285,9 @@ export default class Renderer {
     const cols = Math.max(2, Math.ceil(n / 2));
     const rows = Math.ceil(n / cols);
 
-    const aspect = 3.0 * (1 + (capacity - 4) * 0.11); // 瓶高随容量伸缩，画布安全区由下方压缩逻辑 clamp
-    let bw = Math.min(48, (availW - (cols - 1) * gapX) / cols);
-    let bh = bw * aspect; // 细长试管瓶（贴合参考图俯视角贴图比例）
+    const aspect = BOTTLE_ASPECT * (1 + (capacity - 4) * 0.11); // 瓶高随容量伸缩，画布安全区由下方压缩逻辑 clamp
+    let bw = Math.min(60, (availW - (cols - 1) * gapX) / cols);
+    let bh = bw * aspect; // 矮胖奶瓶瓶形（BOTTLE_ASPECT 基准）
     const needH = rows * bh + (rows - 1) * gapY;
     if (needH > availH) {
       bh = (availH - (rows - 1) * gapY) / rows;
@@ -623,7 +634,7 @@ export default class Renderer {
       [[5, 6, 5, 6], [7]],
     ];
     const bw = 32;
-    const bh = bw * 3.0; // 细长试管瓶，与游戏内一致
+    const bh = bw * BOTTLE_ASPECT; // 矮胖奶瓶，与游戏内一致
     const gap = 26;
     const startX = this.W / 2 - ((deco.length * bw + (deco.length - 1) * gap) / 2);
     const savedCap = this.capacity; // 菜单装饰瓶恒按容量 4 绘制（不受本关容量影响）
@@ -637,7 +648,7 @@ export default class Renderer {
       };
       this.drawBottle(rect, d[0], false, false);
       if (d[1]) {
-        const rect2 = { x: rect.x + rect.w / 2 - 8, y: rect.y + rect.h + 10, w: 16, h: 16 * 3.0 };
+        const rect2 = { x: rect.x + rect.w / 2 - 8, y: rect.y + rect.h + 10, w: 16, h: 16 * BOTTLE_ASPECT };
         this.drawBottle(rect2, d[1], false, false);
       }
     });
@@ -945,7 +956,7 @@ export default class Renderer {
 
     // 中央大瓶示意（矢量，复用 drawBottle：8 层容量、装 3 层示意）
     const bw = 34;
-    const bh = bw * 3.0 * (1 + (8 - 4) * 0.11); // cap=8 伸缩比例
+    const bh = bw * BOTTLE_ASPECT * (1 + (8 - 4) * 0.11); // cap=8 伸缩比例
     const savedCap = this.capacity;
     this.capacity = 8;
     this.drawBottle(
@@ -957,7 +968,7 @@ export default class Renderer {
     this.capacity = savedCap;
     // 左右两个小普通瓶对照（瓶身更小，突出「大瓶」）
     const sw = 17;
-    const sh = sw * 3.0;
+    const sh = sw * BOTTLE_ASPECT;
     this.drawBottle({ x: this.W / 2 - 86, y: cy + 58 + (bh - sh) * 0.6, w: sw, h: sh }, [1], false, false);
     this.drawBottle({ x: this.W / 2 + 69, y: cy + 58 + (bh - sh) * 0.6, w: sw, h: sh }, [2], false, false);
 
@@ -1212,16 +1223,13 @@ export default class Renderer {
     // 仅瓶中直筒随瓶高伸缩（对齐参考图：不同容量瓶只有中段长短不同）。
     // 层级：液体先画（微透明），半透明玻璃瓶后画套住液体（描边实心、玻璃前壁透出液体）
     if (sprite) {
-      ctx.save();
-      ctx.globalAlpha = 0.9; // 液体微透明（玻璃感）
-      this.drawBottleLiquid(rect, layers, true, keyLayerIdx, cap);
-      ctx.restore();
+      this.drawBottleLiquid(rect, layers, true, keyLayerIdx, cap); // 液体不透明（不做透明度处理）
       ctx.save();
       if (ghost) ctx.globalAlpha = 0.5;
       const bTopPx = sprite.height * BOTTLE_TOP_FRAC; // 瓶口段（唇边+颈+肩）源像素
       const bBotPx = sprite.height * BOTTLE_BOT_FRAC; // 瓶底段（圆底）源像素
       const bMidPx = sprite.height - bTopPx - bBotPx;
-      const segTopH = bTopPx * (w / sprite.width); // 按宽等比的固定显示高
+      const segTopH = bTopPx * (w / sprite.width); // 按宽等比固定（不随瓶高拉伸，仅瓶身中段伸缩）
       const segBotH = bBotPx * (w / sprite.width);
       const segMidH = h - segTopH - segBotH;
       if (segMidH > 0) {
@@ -1297,7 +1305,8 @@ export default class Renderer {
     let innerY = fit ? y + h * 0.22 : y + h * 0.08; // 液体顶贴参考图（瓶口段下沿）
     let innerH = fit ? h * 0.73 : h * 0.92 - 3.5; // 底部止于瓶底圆角区之上
     if (tplOn) {
-      // 顶盖平顶位于瓶口段下沿，底盖深入圆底区（U 形）
+      // 顶盖平顶位于瓶口段下沿，底盖深入圆底区（U 形）；
+      // 段高按宽等比固定（与 drawBottle 玻璃三段同口径），截距由混合关布局补偿保证层厚一致
       const spriteG = this.images.bottle;
       const segTopHG = spriteG.height * BOTTLE_TOP_FRAC * (w / spriteG.width);
       const segBotHG = spriteG.height * BOTTLE_BOT_FRAC * (w / spriteG.width);
