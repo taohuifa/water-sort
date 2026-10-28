@@ -73,7 +73,7 @@
     { "level": 18, "par": 23, "colors": 8, "empties": 2, "hiddenCount": 5, "seed": 115 }, // ← 原 L14
     { "level": 19, "par": 24, "colors": 8, "empties": 1, "hiddenCount": 5, "seed": 36009 }, // ← 原 L16
     // 特殊关② 中场 Boss（单独评估加压：colors 5→6，大瓶 6 层收窄颜色压力）
-    { "level": 20, "par": 11, "special": "bigBottle", "bigCapacity": 6, "colors": 6, "empties": 2 },
+    { "level": 20, "par": 11, "special": "bigBottle", "bigCapacity": 6, "bigLayout": "ring", "colors": 6, "empties": 2 }, // Boss② · 环绕（bigRows 1.5 预算最宽松）
     // 后段 21~29：cap3 缓冲 → 混合/8 色 → cap5 峰值 → 锁段（条件→钥匙→双锁）→ 无空瓶收官
     { "level": 21, "par": 12, "seed": 2116, "colors": 6, "empties": 1, "capacity": 3, "hiddenCount": 4, "grant": { "shuffle": 1, "addBottle": 1 } }, // cap3 首秀
     { "level": 22, "par": 19, "mix": true, "colors": 6, "empties": 1, "seed": 124 }, // ← 原 L23
@@ -84,8 +84,7 @@
     { "level": 27, "par": 23, "seed": 1608289, "colors": 8, "empties": 1, "hiddenCount": 5, "keyLockCount": 1 }, // 钥匙锁首秀
     { "level": 28, "par": 22, "seed": 4141677, "colors": 8, "empties": 1, "hiddenCount": 5, "condLockCount": 1, "keyLockCount": 1, "coverCount": 1 }, // 双锁合璧 + 遮盖（coverLayers=2 与条件锁 need=2 同拍揭示）· seed 显式固化并重摇（机制合入钥匙修复后 129 号牌面可解率掉出预算，同 L48 口径）
     { "level": 29, "par": 20, "seed": 2259332, "colors": 7, "hiddenCount": 4, "noEmptyStart": true, "coverCount": 2 }, // 无空瓶首秀 + 双遮盖（遮盖压力峰值）
-    // 特殊关③ 终局 Boss（cap5 普通瓶 + 8 层大瓶收官）
-    { "level": 30, "par": 20, "special": "bigBottle", "bigCapacity": 8, "bigLayout": "sides", "colors": 6, "capacity": 5, "empties": 2 },
+    { "level": 30, "par": 20, "special": "bigBottle", "bigCapacity": 8, "bigLayout": "ring", "colors": 6, "capacity": 5, "empties": 2 }, // 特殊关③ 终局 Boss（cap5 普通瓶 + 8 层大瓶收官）· 2026-10-29 全 ring 拍板
 
     // ═════════ L31~L100：10 章铺量（PRD-100关扩充 §3，设计见 docs/design/关卡扩充-100关-实现.md §3）═════════
     // seed 一律 = 101 + 关卡号（全量固化显式写入，防未来重排）；par/bombMoves 由 tools/solve-report.mjs 回填。
@@ -105,7 +104,7 @@
     { "level": 38, "par": 31, "seed": 6957204, "colors": 8, "empties": 1, "capacity": 5, "hiddenCount": 5, "coverCount": 1 },
     { "level": 39, "par": 33, "bombMoves": 37, "seed": 2973193, "colors": 8, "empties": 1, "capacity": 5, "hiddenCount": 5, "condLockCount": 1, "bombCount": 1 },
     // Boss④（总层数 39，L30 为 33 递进）
-    { "level": 40, "par": 36, "seed": 140, "special": "bigBottle", "bigCapacity": 9, "colors": 7, "capacity": 5, "empties": 2 },
+    { "level": 40, "par": 36, "seed": 140, "special": "bigBottle", "bigCapacity": 9, "bigLayout": "ring", "colors": 7, "capacity": 5, "empties": 2 },
 
     // 第5章 41~50：锁之章 —— 条件锁 ×2（need 2→3 爬坡）、钥匙锁 ×2、双锁复合
     { "level": 41, "par": 26, "seed": 2379695, "colors": 8, "empties": 1, "hiddenCount": 5, "condLockCount": 2, "grant": { "shuffle": 1, "addBottle": 1 } }, // 条件锁 ×2 首秀 · v2 seed 重摇
@@ -118,7 +117,7 @@
     { "level": 48, "par": 24, "seed": 5338105, "colors": 8, "empties": 1, "hiddenCount": 5, "condLockCount": 2, "condLockNeed": 3, "keyLockCount": 1, "timeLimit": 200 }, // seed 单独重摇（逐锁钥匙修复后 148 号牌面可解率过低）· v2 +限时（锁+时限组合教学）
     { "level": 49, "par": 25, "seed": 7346529, "colors": 8, "empties": 1, "hiddenCount": 5, "condLockCount": 1, "condLockNeed": 3, "keyLockCount": 2 }, // 锁段峰值 · v2 seed 重摇
     // Boss⑤（总层数 40）· v2 seed 重摇 + 限时加压（终值按精算 par 公式）
-    { "level": 50, "par": 37, "seed": 23907, "special": "bigBottle", "bigCapacity": 10, "colors": 7, "capacity": 5, "empties": 2, "timeLimit": 456 }, // Boss⑤ · v2 seed 重摇 + 限时加压（=⌈par 57×8⌉；par 为 BFS 超限上界 † 口径）
+    { "level": 50, "par": 37, "seed": 23907, "special": "bigBottle", "bigCapacity": 10, "bigLayout": "ring", "colors": 7, "capacity": 5, "empties": 2, "timeLimit": 456 }, // Boss⑤ · v2 seed 重摇 + 限时加压（=⌈par 57×8⌉；par 为 BFS 超限上界 † 口径）
 
     // 第6章 51~60：无空瓶章 —— noEmptyStart 隔关出现、与锁/隐藏/遮盖组合
     { "level": 51, "par": 27, "seed": 65782, "colors": 8, "noEmptyStart": true, "hiddenCount": 5, "grant": { "shuffle": 1, "addBottle": 1 } }, // 章首 · v2 seed 重摇
@@ -131,7 +130,7 @@
     { "level": 58, "par": 27, "seed": 6689914, "colors": 8, "noEmptyStart": true, "hiddenCount": 5, "condLockCount": 1, "condLockNeed": 3, "keyLockCount": 1, "moveLimit": 33 }, // v2 seed 重摇
     { "level": 59, "par": 25, "seed": 3730942, "colors": 8, "noEmptyStart": true, "hiddenCount": 4, "condLockCount": 1, "condLockNeed": 3, "keyLockCount": 1, "coverCount": 1 }, // 峰值 · seed 单独重摇（159 号牌面 5s 预算内无可解，同 L48 口径）
     // Boss⑥（8 色，总层数 44）· v2 seed 重摇 + 限时加压（终值按精算 par 公式）
-    { "level": 60, "par": 32, "seed": 47674, "special": "bigBottle", "bigCapacity": 10, "colors": 8, "capacity": 5, "empties": 2, "timeLimit": 320 }, // Boss⑥ · v2 大瓶 10 层 + seed 重摇（BFS 超限→† DFS 上界口径，与 L40/70/80/90/100 一致）；timeLimit=max(90, ⌈40×8⌉)
+    { "level": 60, "par": 32, "seed": 47674, "special": "bigBottle", "bigCapacity": 10, "bigLayout": "ring", "colors": 8, "capacity": 5, "empties": 2, "timeLimit": 320 }, // Boss⑥ · v2 大瓶 10 层 + seed 重摇（BFS 超限→† DFS 上界口径，与 L40/70/80/90/100 一致）；timeLimit=max(90, ⌈40×8⌉) · 布局轮换 ring（2026-10-29 用户拍板，sides → ring）
 
     // 第7章 61~70：容量章 —— cap5 全章 + 8 色 + 隐藏 5 + 空瓶 1，机制点缀
     { "level": 61, "par": 27, "seed": 668635, "mix": true, "colors": 8, "empties": 1, "capacity": 5, "grant": { "shuffle": 1, "addBottle": 1 } }, // 章首
@@ -144,7 +143,7 @@
     { "level": 68, "par": 31, "bombMoves": 35, "seed": 3489668, "colors": 8, "empties": 1, "capacity": 5, "hiddenCount": 5, "condLockCount": 1, "bombCount": 1 },
     { "level": 69, "par": 32, "bombMoves": 37, "seed": 4860544, "colors": 8, "empties": 1, "capacity": 5, "hiddenCount": 5, "keyLockCount": 1, "bombCount": 1 }, // 峰值
     // Boss⑦（总层数 45）
-    { "level": 70, "par": 19, "seed": 170, "special": "bigBottle", "bigCapacity": 10, "colors": 8, "capacity": 5, "empties": 2, "timeLimit": 360 }, // Boss 调剂限时（45×8）
+    { "level": 70, "par": 19, "seed": 170, "special": "bigBottle", "bigCapacity": 10, "bigLayout": "ring", "colors": 8, "capacity": 5, "empties": 2, "timeLimit": 360 }, // Boss 调剂限时（45×8）
 
     // 第8章 71~80：组合章 —— 双锁 + 无空瓶 + 遮盖逐关轮换
     { "level": 71, "par": 25, "seed": 8667975, "colors": 8, "noEmptyStart": true, "hiddenCount": 5, "condLockCount": 1, "keyLockCount": 1, "grant": { "shuffle": 1, "addBottle": 1 } }, // 章首：双锁×无空瓶 · v2 seed 重摇
@@ -157,7 +156,7 @@
     { "level": 78, "par": 25, "seed": 11432446, "colors": 8, "empties": 1, "hiddenCount": 4, "condLockCount": 2, "condLockNeed": 3, "coverCount": 1 }, // seed 单独重摇（178 号牌面 5s 预算内无可解，同 L48 口径）· v2 seed 再重摇
     { "level": 79, "par": 22, "bombMoves": 27, "seed": 9233497, "colors": 8, "noEmptyStart": true, "hiddenCount": 4, "condLockCount": 1, "condLockNeed": 3, "keyLockCount": 1, "coverCount": 1, "bombCount": 1 }, // 峰值 · seed 单独重摇（179 号牌面 5s 预算内无可解，同 L48 口径）· v2 +炸弹
     // Boss⑧（总层数 46）
-    { "level": 80, "par": 47, "seed": 180, "special": "bigBottle", "bigCapacity": 11, "colors": 8, "capacity": 5, "empties": 2 },
+    { "level": 80, "par": 47, "seed": 180, "special": "bigBottle", "bigCapacity": 11, "bigLayout": "ring", "colors": 8, "capacity": 5, "empties": 2 },
 
     // 第9章 81~90：极限章 —— 8 色 + 空瓶 1 + 双锁 + 隐藏 5 + cap5/mix 轮换（三重叠加）
     { "level": 81, "par": 28, "seed": 15109747, "colors": 8, "empties": 1, "capacity": 5, "hiddenCount": 5, "condLockCount": 1, "keyLockCount": 1, "grant": { "shuffle": 1, "addBottle": 1 } }, // 章首 · seed 单独重摇（181 号牌面 5s 预算内无可解，同 L48 口径）
@@ -170,7 +169,7 @@
     { "level": 88, "par": 31, "seed": 13737339, "colors": 8, "empties": 1, "capacity": 5, "hiddenCount": 5, "condLockCount": 1, "condLockNeed": 3, "keyLockCount": 2, "timeLimit": 248 }, // seed 单独重摇（188 号牌面 5s 预算内无可解，同 L48 口径）
     { "level": 89, "par": 32, "bombMoves": 37, "seed": 12247848, "colors": 8, "empties": 1, "capacity": 5, "hiddenCount": 4, "condLockCount": 1, "condLockNeed": 3, "keyLockCount": 1, "bombCount": 1 }, // 峰值（三重叠加）· seed 单独重摇（189 号牌面 5s 预算内无可解，同 L48 口径）
     // Boss⑨（总层数 47，普通 Boss 峰值）
-    { "level": 90, "par": 44, "seed": 190, "special": "bigBottle", "bigCapacity": 12, "colors": 8, "capacity": 5, "empties": 2, "timeLimit": 416 }, // Boss 调剂限时（52×8）
+    { "level": 90, "par": 44, "seed": 190, "special": "bigBottle", "bigCapacity": 12, "bigLayout": "ring", "colors": 8, "capacity": 5, "empties": 2, "timeLimit": 416 }, // Boss 调剂限时（52×8）· 2026-10-29 全 ring 拍板
 
     // 第10章 91~100：终章 —— 高难配方 + 炸弹瓶加重引入
     { "level": 91, "par": 30, "bombMoves": 36, "seed": 10279432, "colors": 8, "empties": 1, "capacity": 5, "hiddenCount": 4, "condLockCount": 1, "condLockNeed": 3, "keyLockCount": 1, "bombCount": 1, "grant": { "shuffle": 1, "addBottle": 1 } }, // 章首 · seed 单独重摇（191 号牌面 5s 预算内无可解，同 L48 口径）
@@ -183,6 +182,6 @@
     { "level": 98, "par": 31, "bombMoves": 34, "seed": 8245449, "colors": 8, "empties": 1, "capacity": 5, "hiddenCount": 3, "condLockCount": 1, "condLockNeed": 3, "keyLockCount": 1, "bombCount": 2, "timeLimit": 248 }, // seed 单独重摇（198 号牌面 5s 预算内无可解，同 L48 口径）· 限时试用（par 31 → timeLimit=248）
     { "level": 99, "par": 28, "bombMoves": 34, "seed": 2805439, "colors": 8, "empties": 1, "capacity": 5, "hiddenCount": 3, "condLockCount": 1, "condLockNeed": 3, "keyLockCount": 1, "bombCount": 2, "timeLimit": 232, "moveLimit": 44 }, // 普通关最高配 · seed 单独重摇（199 号牌面 5s 预算内无可解，同 L48 口径）· 双限制试用（moveLimit=44、timeLimit=29×8=232）· v2 卸载遮盖（与 L96 对称减负，保留双限+双弹压轴）· 卸载后牌面重摇（同 L96 口径，+7919 步进扫描命中 244146）
     // Boss⑩ 终极（PRD 拍板口径：cap5 普通瓶 + 8 层大瓶 + 8 色）
-    { "level": 100, "par": 52, "seed": 200, "special": "bigBottle", "bigCapacity": 8, "colors": 8, "capacity": 5, "empties": 2 }
+    { "level": 100, "par": 52, "seed": 200, "special": "bigBottle", "bigCapacity": 8, "bigLayout": "ring", "colors": 8, "capacity": 5, "empties": 2 } // Boss⑩ 终极（PRD 拍板口径：cap5 普通瓶 + 8 层大瓶 + 8 色）· 布局轮换 ring 收尾
   ]
 }

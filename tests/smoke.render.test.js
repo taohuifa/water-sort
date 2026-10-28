@@ -385,7 +385,7 @@ check('F-04：道具出厂废除 + 首入赠送一次性 + 撤销道具化（背
 function assertBottlesInSafeArea() {
   for (const r of renderer.bottleRects) {
     assert.ok(r.x >= 0 && r.x + r.w <= renderer.W, `瓶横向越界 x=${r.x} w=${r.w}`);
-    assert.ok(r.y >= 230, `瓶顶越界 y=${r.y}`);
+    assert.ok(r.y >= 205, `瓶顶越界 y=${r.y}`); // 特殊关 ring 上界 sTop=212（2026-10-29 扩容），普通关 playTop=252
     assert.ok(r.y + r.h <= renderer.H - 110, `瓶底越界 y+h=${r.y + r.h}`);
   }
 }

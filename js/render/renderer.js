@@ -235,9 +235,11 @@ export default class Renderer {
       // sides = 大瓶居中、普通瓶左右两列夹持（吧台摆位）；ring = 普通瓶上排 + 左右两列环绕大瓶。
       // 三种模式均保证瓶与瓶/大瓶不重叠。
       const aspectN = BOTTLE_ASPECT * (capacity / 4); // 瓶高随本关容量等比（层高恒定口径）；大瓶同式按 bigCapacity/capacity 折算
-      // 竖向预算（特殊关专属收紧，普通关不受影响）：上界贴近货架、下界贴近按钮排
-      const sTop = 248;
-      const sBottom = this.H - 116;
+      // 竖向预算（特殊关专属，普通关不受影响）：2026-10-29 全 ring 布局扩容——
+      // 上界 248→212（贴近顶部货架下沿）、下界 H-116→H-110（贴近按钮排），换取 ring 瓶径变大
+      const sTop = 212;
+      // 下界预留道具按钮排（btnY=H-86、r=27 → 按钮顶 H-113）：瓶底最深 H-138，留 25px 间隙
+      const sBottom = this.H - 138;
       const sAvailH = sBottom - sTop;
       const vGap = 14; // 上排/大瓶/下排之间的行距（比普通关 30 紧，换取瓶宽）
       const bigRows = bigCapacity / capacity; // 大瓶折算普通瓶高的倍数
@@ -245,7 +247,7 @@ export default class Renderer {
       if (mode === 'ring') {
         // —— 圆形环绕：普通瓶沿椭圆均布围住居中大瓶（自正上方起），重叠则整体放大半径迭代 ——
         const normalsC = n - 1;
-        const edge = gapX * 2; // 瓶与大瓶/画布边缘的间距
+        const edge = 18; // 瓶与大瓶/画布边缘的间距（ring 扩容：24→18，配合棋盘上下界放宽）
         // 尺寸预算：环带总高 = bigH + 2×edge + 2×bh ≤ sAvailH；宽 = 2bw + bigW + 2×edge ≤ availW
         // 固定基准瓶宽 56（全关卡统一口径），仅超预算才等比缩小兜底
         const bw = Math.max(20, Math.min(56,
@@ -256,7 +258,7 @@ export default class Renderer {
         const bigH = bigRows * bh;
         const bigW = Math.min(bigH / BOTTLE_ASPECT, availW - 2 * bw - 2 * edge);
         const cx = this.W / 2;
-        const cy = sTop + sAvailH / 2;
+        const cy = sTop + sAvailH / 2; // 环心垂直居中于 [sTop, sBottom]；整体偏移会破坏垂直预算导致顶部瓶被钳压到大瓶口（2026-10-29 修正）
         this.bottleRects[bigIdx] = { x: cx - bigW / 2, y: cy - bigH / 2, w: bigW, h: bigH };
         const idxs = [];
         for (let i = 0; i < n; i++) if (i !== bigIdx) idxs.push(i);
@@ -278,8 +280,8 @@ export default class Renderer {
             }
           }
           if (!clash) break;
-          rx *= 1.04;
-          ry *= 1.04;
+          rx = Math.min(rx * 1.04, this.W / 2 - bw / 2 - 6); // 横向兜底：不出屏
+          ry = Math.min(ry * 1.04, sAvailH / 2 - bh / 2); // 纵向兜底：钳在界内，防越界后被 y 钳制压到大瓶/按钮排
         }
         idxs.forEach((i, a) => {
           const th = -Math.PI / 2 + (a * 2 * Math.PI) / m;
