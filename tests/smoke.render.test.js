@@ -859,21 +859,25 @@ check('混合容量关渲染：第 11 关（原 L26）底对齐、瓶高 ∝ 容
   assert.strictEqual(logic.caps.length, logic.bottles.length, 'caps 与 bottles 平行');
   assert.ok(logic.caps.some((c) => c !== logic.capacity), '容量应存在 3~5 混合');
 
-  const aspect = BOTTLE_ASPECT * (1 + (logic.capacity - 4) * 0.11);
   let refW = null;
   let refH = null;
+  let refCap = null;
   for (let i = 0; i < logic.bottles.length; i++) {
     const r = renderer.bottleRects[i];
     assert.ok(r && r.h > 0, `瓶 ${i} 应有布局`);
-    // 同关瓶尺寸一致（大小统一，容量差异只体现在液体层数）
+    // 同关瓶宽一致；瓶高 ∝ 容量（层高统一口径，瓶形携带容量信息）
     if (refW === null) {
       refW = r.w;
       refH = r.h;
+      refCap = logic.caps[i];
     } else {
       assert.strictEqual(r.w, refW, `瓶 ${i} 宽应与其余瓶一致`);
-      assert.strictEqual(r.h, refH, `瓶 ${i} 高应与其余瓶一致`);
+      assert.ok(
+        Math.abs(r.h - (refH * logic.caps[i]) / refCap) < 2,
+        `瓶 ${i} 高应按容量等比（${r.h} vs ${((refH * logic.caps[i]) / refCap).toFixed(1)}）`
+      );
     }
-    assert.ok(Math.abs(r.h / r.w - aspect) < 0.4, `瓶 ${i} 高宽比应符合瓶形基准`);
+    assert.ok(Math.abs(r.h / r.w - (BOTTLE_ASPECT * logic.caps[i]) / 4) < 0.3, `瓶 ${i} 高宽比应符合容量等比瓶形`);
     assert.strictEqual(logic.bottles[i].length <= logic.caps[i], true, `瓶 ${i} 层数不超容量`);
   }
   // 行内近似底对齐：散布纵向抖动 ±22px（F-散布布局），排内瓶底差 ≤ 44px
@@ -906,6 +910,37 @@ check('混合容量关渲染：第 11 关（原 L26）底对齐、瓶高 ∝ 容
   tap(p.x, p.y);
   assert.strictEqual(main.selected, target, '混合关触摸应按实际 rect 命中');
   main.selected = -1;
+});
+
+check('全关卡固定瓶尺寸：普通关基准瓶宽恒 56（跨关卡一致），大瓶关仅超预算才等比兜底（2026-10-29 口径）', () => {
+  const bigLevels = new Set([9, 19, 29, 39, 49, 59, 69, 79, 89, 99]); // 大瓶关（0 基）
+  let checked = 0;
+  for (let idx = 0; idx < 100; idx++) {
+    main.loadLevel(idx);
+    main.scene = 'game';
+    main.tick();
+    const rects = renderer.bottleRects;
+    assert.ok(rects.length > 0, `L${idx + 1} 应有布局`);
+    // 普通瓶同关瓶宽必须一致（大瓶关的大瓶按层高口径折算，天然更宽，不参与）
+    const normalRects = rects.filter((_, i) => i !== logic.bigIndex);
+    const w0 = normalRects[0].w;
+    for (const r of normalRects) assert.strictEqual(r.w, w0, `L${idx + 1} 普通瓶宽应同关一致`);
+    if (!bigLevels.has(idx)) {
+      // 普通关（含混合关）：390x844 画布上固定基准瓶宽 56，无兜底
+      assert.strictEqual(w0, 56, `L${idx + 1} 普通关瓶宽应为基准 56（实际 ${w0}）`);
+    } else {
+      // 大瓶关：≤ 56（超预算等比缩小兜底），且大瓶瓶形比例 1:BOTTLE_ASPECT
+      assert.ok(w0 <= 56 && w0 >= 20, `L${idx + 1} 大瓶关瓶宽应在 [20,56]（实际 ${w0}）`);
+      const bigRect = rects[logic.bigIndex];
+      assert.ok(
+        Math.abs(bigRect.w / bigRect.h - 1 / BOTTLE_ASPECT) < 0.03,
+        `L${idx + 1} 大瓶应保持瓶形比例 1:${BOTTLE_ASPECT}`
+      );
+    }
+    assertBottlesInSafeArea();
+    checked++;
+  }
+  assert.strictEqual(checked, 100, '应遍历全部 100 关');
 });
 
 check('满瓶完成徽章链：满色瓶停留 ✓ 徽章 → 徽章结束后才起飞货架', () => {  // 进入 L1，DFS 求解路径（与 AC-11 同源），逐步经 tap 驱动真实 UI 动画链

@@ -195,10 +195,11 @@ export default class Renderer {
   }
 
   /**
-   * 每关根据瓶数与容量计算瓶子网格布局。瓶高随容量线性伸缩（cap=4 基准，每 ±1 层 ±11%，Q1=A）。
+   * 每关根据瓶数与容量计算瓶子网格布局。全关卡固定瓶尺寸口径（2026-10-29）：
+   * 基准瓶宽 56 跨关卡一致，瓶高按容量等比（层高全局恒定，见 _bottleHeight）；
+   * 列数只决定排布，仅当固定尺寸超出棋盘预算才整体等比缩小兜底。
    * bigIdx >= 0（特殊关，S-07）：普通瓶分上下两行环绕，大瓶居中独占中带——
-   * 宽度为普通瓶 1.8 倍，高度按 bigCapacity 走同一 ±11%/层 伸缩公式；
-   * 尺寸由「行宽不越界」与「2·bh + 2·gapY + bigH ≤ 安全区高」联立约束解出。
+   * 高度按 bigCapacity 走同一层高恒定口径；同样以基准瓶宽 56 起算、超预算等比缩小。
    */
   setupBoard(bottleCount, capacity = 4, bigIdx = -1, bigCapacity = 0, caps = null, seed = 0, bigLayout = null) {
     this.capacity = capacity;
@@ -219,7 +220,7 @@ export default class Renderer {
       // 特殊关布局（bigLayout 可配置）：rows（默认）= 上排/中带大瓶/下排（R2 棋盘）；
       // sides = 大瓶居中、普通瓶左右两列夹持（吧台摆位）；ring = 普通瓶上排 + 左右两列环绕大瓶。
       // 三种模式均保证瓶与瓶/大瓶不重叠。
-      const aspectN = BOTTLE_ASPECT * (1 + (capacity - 4) * 0.11);
+      const aspectN = BOTTLE_ASPECT * (capacity / 4); // 瓶高随本关容量等比（层高恒定口径）；大瓶同式按 bigCapacity/capacity 折算
       // 竖向预算（特殊关专属收紧，普通关不受影响）：上界贴近货架、下界贴近按钮排
       const sTop = 248;
       const sBottom = this.H - 116;
@@ -232,9 +233,11 @@ export default class Renderer {
         const normalsC = n - 1;
         const edge = gapX * 2; // 瓶与大瓶/画布边缘的间距
         // 尺寸预算：环带总高 = bigH + 2×edge + 2×bh ≤ sAvailH；宽 = 2bw + bigW + 2×edge ≤ availW
-        const hCapBh = (sAvailH - 2 * edge) / (bigRows + 2);
-        const wCapBw = (availW - 2 * edge) / (2 + (bigRows * aspectN) / BOTTLE_ASPECT);
-        const bw = Math.max(20, Math.min(60, hCapBh / aspectN, wCapBw));
+        // 固定基准瓶宽 56（全关卡统一口径），仅超预算才等比缩小兜底
+        const bw = Math.max(20, Math.min(56,
+          (sAvailH - 2 * edge) / ((bigRows + 2) * aspectN),
+          (availW - 2 * edge) / (2 + (bigRows * aspectN) / BOTTLE_ASPECT)
+        ));
         const bh = bw * aspectN;
         const bigH = bigRows * bh;
         const bigW = Math.min(bigH / BOTTLE_ASPECT, availW - 2 * bw - 2 * edge);
@@ -282,13 +285,13 @@ export default class Renderer {
         const perCol = Math.ceil((normalsS - topCount) / 2);
         const colGap = 14; // 列内瓶距
         // 高度预算解 bh：sides → colH ≤ sAvailH；ring → bh + vGap + max(colH, bigH) ≤ sAvailH
-        const hCapBh =
+        // 固定基准瓶宽 56（全关卡统一口径），仅超预算才等比缩小兜底
+        const bw = Math.max(20, Math.min(56,
           mode === 'sides'
-            ? (sAvailH - (perCol - 1) * colGap) / perCol
-            : (sAvailH - vGap - (perCol - 1) * colGap) / (1 + Math.max(perCol, bigRows));
-        // 宽度预算：2×列宽 + 大瓶宽 + 4×gapX ≤ availW（bigW = bigRows×bh/BOTTLE_ASPECT）
-        const wCapBw = (availW - 4 * gapX) / (2 + (bigRows * aspectN) / BOTTLE_ASPECT);
-        const bw = Math.max(20, Math.min(60, hCapBh / aspectN, wCapBw));
+            ? (sAvailH - (perCol - 1) * colGap) / (perCol * aspectN)
+            : (sAvailH - vGap - (perCol - 1) * colGap) / ((1 + Math.max(perCol, bigRows)) * aspectN),
+          (availW - 4 * gapX) / (2 + (bigRows * aspectN) / BOTTLE_ASPECT)
+        ));
         const bh = bw * aspectN;
         const bigH = bigRows * bh;
         const bigW = Math.min(bigH / BOTTLE_ASPECT, availW - 2 * bw - 4 * gapX);
@@ -323,12 +326,12 @@ export default class Renderer {
       const topCount = Math.max(1, Math.ceil(normals / 2));
       const botCount = normals - topCount;
       const cols = Math.max(topCount, botCount, 1);
-      // 宽度约束：行内不越界（含 60px 常规上限）；大瓶宽由高度反推（瓶形 1:BOTTLE_ASPECT 比例），仅需防越界
-      const wCap = Math.min(60, (availW - (cols - 1) * gapX) / cols);
-      // 高度约束（统一层厚：大瓶层厚 = 普通瓶层厚，bigH = bigCap/cap × bh）：
-      // 上排 bh + vGap + bigH + vGap + 下排 bh ≤ sAvailH
-      const hCap = (sAvailH - 2 * vGap) / (aspectN * (2 + bigRows));
-      const bw = Math.max(20, Math.min(wCap, hCap));
+      // 固定基准瓶宽 56（全关卡统一口径），仅超宽/高预算才等比缩小兜底：
+      // 上排 bh + vGap + bigH + vGap + 下排 bh ≤ sAvailH（统一层厚：大瓶层厚 = 普通瓶层厚）
+      const bw = Math.max(20, Math.min(56,
+        (availW - (cols - 1) * gapX) / cols,
+        (sAvailH - 2 * vGap) / (aspectN * (2 + bigRows))
+      ));
       const bh = bw * aspectN;
       const bigH = bigRows * bh;
       // 大瓶宽度按玻璃贴图瓶形比例 1:BOTTLE_ASPECT 由高度反推（固定倍数会在不同容量下拉伸变形）
@@ -350,50 +353,44 @@ export default class Renderer {
       return;
     }
 
-    // 混合容量关与普通关同布局：每关内瓶子统一尺寸（大小一致），液体按各自容量在瓶内分层。
-    // （旧「瓶高 ∝ 容量」口径已废除；caps 仅在绘制层高时经 bottleCap 生效）
-
-    // 列数自适应：候选 2..⌈n/2⌉ 中选「瓶宽×瓶高」最大的列数——
-    // 宽约束（含散布余量）与高约束（行数×瓶高 + 行距 ≤ 棋盘高）取小，
-    // 瓶子尽量撑满棋盘（宽排/密排自动择优），瓶形 1:aspect 保持不变
-    const aspect = BOTTLE_ASPECT * (1 + (capacity - 4) * 0.11);
-    let cols = 2;
-    let bw = 16;
-    let bh = bw * aspect;
-    for (let c = 2, cMax = Math.max(2, Math.ceil(n / 2)); c <= cMax; c++) {
-      const rowsC = Math.ceil(n / c);
-      let w = Math.min(76, (availW - (c - 1) * (gapX + 8)) / c);
-      let h = w * aspect;
-      const needH = rowsC * h + (rowsC - 1) * gapY;
-      if (needH > availH) {
-        h = (availH - (rowsC - 1) * gapY) / rowsC;
-        w = h / aspect;
-      }
-      w = Math.max(16, w);
-      if (w * h > bw * bh) {
-        cols = c;
-        bw = w;
-        bh = h;
-      }
-    }
+    // 全关卡固定瓶尺寸（2026-10-29 定稿口径）：基准瓶宽 56 跨关卡完全一致，列数只决定排布不缩放瓶子；
+    // 瓶高按容量等比（层高全局恒定）：普通关所有瓶等高，混合关瓶高随各自容量（瓶形携带容量信息）。
+    // 仅当固定尺寸网格超出棋盘预算（极窄屏/预算外瓶数）才整体等比缩小兜底。
+    const BASE_BW = 56;
+    const colsMax = Math.max(1, Math.floor((availW + gapX) / (BASE_BW + gapX)));
+    const cols = Math.min(Math.max(2, Math.ceil(n / 2)), colsMax);
     const rows = Math.ceil(n / cols);
-    const gridH = rows * bh + (rows - 1) * gapY;
+    const capOf = (i) => (this.caps && this.caps[i] ? this.caps[i] : capacity);
+    const rowHs = [];
+    for (let i = 0; i < n; i++) {
+      const r = Math.floor(i / cols);
+      rowHs[r] = Math.max(rowHs[r] || 0, this._bottleHeight(capOf(i), BASE_BW));
+    }
+    // 兜底等比缩小：固定尺寸网格超宽/超高时整体缩（常规机型 390 宽 × 844 高下 100 关均不触发）
+    const needW = cols * BASE_BW + (cols - 1) * gapX;
+    const needH = rowHs.reduce((a, b) => a + b, 0) + (rows - 1) * gapY;
+    const s = Math.min(1, availW / needW, availH / needH);
+    const bw = Math.max(16, BASE_BW * s);
+    const gridH = needH * s;
     const startY = playTop + (availH - gridH) / 2;
 
-    // 离散散布：行内瓶距随机（rng 可复现）+ 每瓶纵向抖动（±22px < 行距 48px，钳制安全区保证不重叠）
+    // 离散散布：行内瓶距随机（rng 可复现）+ 每瓶纵向抖动（±22px < 行距 48px，钳制安全区保证不重叠）；
+    // 行内按行底基线对齐（混合关各瓶高不同，底对齐让液面层次一目了然）
     const rng = new Rng((seed ^ 0x5f3759df) >>> 0);
     let rowXs = null;
     for (let i = 0; i < n; i++) {
       const r = Math.floor(i / cols);
       const c = i % cols;
       if (c === 0) rowXs = this._scatterRowXs(Math.min(cols, n - r * cols), bw, availW, rng);
+      const h = this._bottleHeight(capOf(i), bw);
       const dy = (rng.next() * 2 - 1) * 22;
-      const yy = Math.max(playTop, Math.min(startY + r * (bh + gapY) + dy, playBottom - bh)); // 安全区钳制
+      const rowBottom = startY + (rowHs.slice(0, r + 1).reduce((a, b) => a + b, 0) + r * gapY) * s;
+      const yy = Math.max(playTop, Math.min(rowBottom - h + dy, playBottom - h)); // 安全区钳制
       this.bottleRects.push({
         x: rowXs[c],
         y: yy,
         w: bw,
-        h: bh,
+        h,
       });
     }
   }
@@ -426,6 +423,21 @@ export default class Renderer {
     if (i === this.bigIdx && this.bigCapacity > 0) return this.bigCapacity;
     if (this.caps && this.caps[i]) return this.caps[i];
     return this.capacity;
+  }
+
+  /**
+   * 瓶绘制高度（瓶高∝容量口径，2026-10-29 全关卡统一）：层高 = 同宽 cap4 瓶内液区 ÷ 4，
+   * cap4 恒等于 bw×BOTTLE_ASPECT；素材三段/矢量降级两分支与 drawBottleLiquid 严格同构
+   * （降级口径 innerY=y+0.08h、innerH=0.92h−3.5）。setupBoard 布局与 drawTest 沙盒共用。
+   */
+  _bottleHeight(cap, bw) {
+    const sp = this.images.bottle;
+    if (sp && sp.width) {
+      const segTop = sp.height * BOTTLE_TOP_FRAC * (bw / sp.width);
+      const segBot = sp.height * BOTTLE_BOT_FRAC * (bw / sp.width);
+      return cap * ((bw * BOTTLE_ASPECT - segTop - segBot * 0.4) / 4) + segTop + segBot * 0.4;
+    }
+    return (cap * ((bw * BOTTLE_ASPECT * 0.92 - 3.5) / 4) + 3.5) / 0.92;
   }
 
   bottleRect(idx) {
@@ -799,20 +811,8 @@ export default class Renderer {
 
     const bw = 56;
     const gap = 30;
-    const spriteG = this.images.bottle;
-    const tplOn = !!(spriteG && spriteG.width); // 素材三段口径（与 drawBottleLiquid tplOn 分支一致）
-    const segTop = tplOn ? spriteG.height * BOTTLE_TOP_FRAC * (bw / spriteG.width) : 0;
-    const segBot = tplOn ? spriteG.height * BOTTLE_BOT_FRAC * (bw / spriteG.width) : 0;
-    // 层高与游戏内同算法：= 同宽 cap4 游戏瓶的内液区高度 ÷ 4（cap4 瓶与游戏 1:1 等高，
-    // 其余容量按「瓶高 = 层高×容量 + 固定段」缩放），预览比例与真实关卡一致。
-    // 降级分支与 drawBottleLiquid 的 fit && !tplOn 口径严格同构（innerY=y+0.08h、innerH=0.92h−3.5）
-    const layerH = tplOn
-      ? (bw * BOTTLE_ASPECT - segTop - segBot * 0.4) / 4
-      : (bw * BOTTLE_ASPECT * 0.92 - 3.5) / 4;
+    const hOf = (cap) => this._bottleHeight(cap, bw); // 与游戏内 setupBoard 同一算法入口（口径天然一致）
     const baseY = this.H * 0.68; // 四瓶底部对齐线
-    const hOf = (cap) => (tplOn
-      ? cap * layerH + segTop + segBot * 0.4
-      : (cap * layerH + 3.5) / 0.92);
     const totalW = caps.length * bw + (caps.length - 1) * gap;
     const x0 = this.W / 2 - totalW / 2;
     caps.forEach((cap, i) => {
@@ -1133,7 +1133,7 @@ export default class Renderer {
 
     // 中央大瓶示意（矢量，复用 drawBottle：8 层容量、装 3 层示意）
     const bw = 34;
-    const bh = bw * BOTTLE_ASPECT * (1 + (8 - 4) * 0.11); // cap=8 伸缩比例
+    const bh = this._bottleHeight(8, bw); // cap=8 大瓶示意（瓶高∝容量统一口径）
     const savedCap = this.capacity;
     this.capacity = 8;
     this.drawBottle(
