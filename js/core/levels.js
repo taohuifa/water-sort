@@ -105,13 +105,24 @@ export function buildLevelsFromConfig(cfg) {
       special: r.special ?? defaults.special ?? null,
       bigCapacity: num(r.bigCapacity, num(defaults.bigCapacity, 0)),
       maxBottles: num(r.maxBottles, num(defaults.maxBottles, 12)), // 加瓶上限（GameLogic.addBottle 用）
-      props: { shuffle: 1, addBottle: 1, ...(defaults.props || {}), ...(r.props || {}) },
+      // 遮盖瓶（PRD-玩法扩展 §2 A）：数量与每瓶遮盖层数，规则见 game.js isCovered/coverLeft
+      coverCount: num(r.coverCount, num(defaults.coverCount, 0)),
+      coverLayers: num(r.coverLayers, num(defaults.coverLayers, 2)),
+      // 炸弹瓶（PRD-玩法扩展 §2 B）：数量与倒计时步数（0 = 自动：生成时按解长 + 余量定，见 game.js _generate）
+      bombCount: num(r.bombCount, num(defaults.bombCount, 0)),
+      bombMoves: num(r.bombMoves, num(defaults.bombMoves, 0)),
+      // 首入赠送（PRD-道具背包 §2 D）：可选字段原样透传，发放/防重与持久化在胶水层
+      grant: r.grant ?? defaults.grant ?? null,
+      // 最短步数（PRD-玩法扩展 §2 C 三星基准）：由 tools/solve-report.mjs 回填，原样透传
+      par: r.par ?? defaults.par ?? null,
       // 逐关随机种子（满意局面固化）：缺省 = seedBase + 关卡号
       seed: typeof r.seed === 'number' ? r.seed : seedBase + i,
     };
     if (lv.noEmptyStart) lv.empties = 0; // 无空瓶开局：空瓶数由机制置 0
     _validateSpecial(lv, i);
     _validateMix(lv, i);
+    _validateCover(lv, i);
+    _validateBomb(lv, i);
     levels.push(lv);
   }
   return levels;
@@ -139,6 +150,8 @@ function _validateSpecial(lv, level) {
     ['hiddenCount', '隐藏层'],
     ['condLockCount', '条件锁'],
     ['keyLockCount', '钥匙锁'],
+    ['coverCount', '遮盖'],
+    ['bombCount', '炸弹'],
   ];
   for (const [k, label] of forceZero) {
     if (lv[k]) {
@@ -149,6 +162,44 @@ function _validateSpecial(lv, level) {
   if (lv.noEmptyStart) {
     console.warn(`[levels] L${level} 特殊关不叠加无空瓶开局（v1），noEmptyStart 强制 false`);
     lv.noEmptyStart = false;
+  }
+}
+
+/**
+ * 遮盖瓶参数校验（PRD-玩法扩展 §2 A）：
+ * - coverLayers 非法（非正整数）→ 回退 2 + warn；
+ * - coverLayers ≥ colors 时成品总数不足以解封（必死局）→ clamp 为 colors - 1 + warn。
+ */
+function _validateCover(lv, level) {
+  if (!lv.coverCount) return;
+  if (!(Number.isInteger(lv.coverLayers) && lv.coverLayers >= 1)) {
+    console.warn(`[levels] L${level} coverLayers=${lv.coverLayers} 非法（需 ≥1 整数），回退 2`);
+    lv.coverLayers = 2;
+  }
+  if (lv.coverLayers >= lv.colors) {
+    console.warn(
+      `[levels] L${level} coverLayers=${lv.coverLayers} ≥ colors=${lv.colors}（成品不足以解封必死局），clamp 为 ${lv.colors - 1}`
+    );
+    lv.coverLayers = lv.colors - 1;
+  }
+}
+
+/**
+ * 炸弹瓶参数校验（PRD-玩法扩展 §2 B）：
+ * - bombMoves 非法（非 ≥0 整数）→ 回退 0（自动）+ warn；
+ * - 显式 0 < bombMoves < 8：低于解长约束可行域（解长 ≤ bombMoves - 2 且解长下限 > 6）→ 回退 0（自动）+ warn。
+ * 自动口径（0）在生成时按启发式解长 + 余量 4、向下不小于 8 确定（见 game.js _generate）。
+ */
+function _validateBomb(lv, level) {
+  if (!lv.bombCount) return;
+  if (!(Number.isInteger(lv.bombMoves) && lv.bombMoves >= 0)) {
+    console.warn(`[levels] L${level} bombMoves=${lv.bombMoves} 非法（需 ≥0 整数，0=自动），回退 0`);
+    lv.bombMoves = 0;
+    return;
+  }
+  if (lv.bombMoves > 0 && lv.bombMoves < 8) {
+    console.warn(`[levels] L${level} bombMoves=${lv.bombMoves} 过小（解长约束需 ≥8），回退 0（自动）`);
+    lv.bombMoves = 0;
   }
 }
 
@@ -169,6 +220,8 @@ function _validateMix(lv, level) {
     ['condLockCount', '条件锁'],
     ['keyLockCount', '钥匙锁'],
     ['hiddenCount', '隐藏层'],
+    ['coverCount', '遮盖'],
+    ['bombCount', '炸弹'],
   ];
   for (const [k, label] of forceZero) {
     if (lv[k]) {

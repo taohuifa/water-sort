@@ -37,6 +37,25 @@ Nightly v2.01 与稳定版 2.02.2608080 均复现。
 - `miniprogram-automator-next`（社区修复版 SDK）同样只修了启动侧问题，API 挂起无解
 - `automation_game_action`（MCP 的画布 tap）内部依赖 automator → 本机同样无效（返回 status 0 但无实际效果，具有欺骗性）
 
+## 2026-10-28 追加（tap 坐标换算回归 + Input 会话重建）
+
+### ⚠️ tap 坐标基准被改错的教训（探针实证定案）
+- **症状**：模拟器窗口缩小（webview zoom≈0.61）后所有 tap「成功返回但场景不变」
+- **根因**：2026-10-27 集成期把 tap 换算从「宿主 webview 元素 rect」改成「guest 页 canvas rect」
+  ——canvas rect 恒 390×844（guest 视口），但 **CDP Input 坐标按宿主视口解释**（本文件
+  2026-10-27 追加 §关键坐标系 早已实证记载）。zoom≠1 时两种基准差一个原点+缩放，整体错位
+- **实证手段**：guest 侧埋点 `wx.onTouchStart(cb → wx.setStorageSync('__tap_probe', …))`，
+  tap 后读探针坐标与目标比对——错位量恰好 = (cdp − 元素原点) ÷ zoom 的反解残差
+- **修复**：wx.mjs tap 恢复 `cdp = webview元素原点 + 游戏坐标 × (元素尺寸/游戏尺寸)`
+  （hostWebContents 读 `<webview>` rect，canvas rect 仅作兜底）；修复后 menu→levelSelect ✓CHANGED
+- **纪律**：改调试工具的坐标系前先查本文件既有实证；探针埋点（onTouchStart + storage）
+  是坐标争议的最终仲裁手段
+
+### tap 前 detach→attach 固化
+- 重编译重载后旧 CDP 会话的 Input dispatch 会**成功返回但不注入**（非挂起超时，更隐蔽）
+- wx.mjs tap 现每次强制 `detach() → attach("1.3") → bringToFront → setFocusEmulationEnabled`
+  （此前只在「未附加」时 attach，死会话永远不被清理）
+
 ## MCP 通道（服务端口）
 
 ### 配置两大坑

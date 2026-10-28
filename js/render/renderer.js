@@ -143,6 +143,9 @@ export default class Renderer {
     // 暂停浮层
     this.pauseResumeBtn = { x: W / 2 - 90, y: this.H / 2 - 44, w: 180, h: 48 };
     this.pauseExitBtn = { x: W / 2 - 90, y: this.H / 2 + 24, w: 180, h: 48 };
+    // 失败弹窗（PRD-玩法扩展 §2 B：重开 / 广告复活，布局与暂停浮层同构）
+    this.failReviveBtn = { x: W / 2 - 90, y: this.H / 2 - 44, w: 180, h: 48 };
+    this.failRestartBtn = { x: W / 2 - 90, y: this.H / 2 + 24, w: 180, h: 48 };
     // 菜单页
     this.menuPlayBtn = { x: W / 2 - 110, y: this.H * 0.52, w: 220, h: 56 };
     this.menuSettingsBtn = { x: W / 2 - 110, y: this.H * 0.52 + 76, w: 220, h: 56 };
@@ -364,10 +367,15 @@ export default class Renderer {
       }
       return null;
     }
-    // game 场景（浮层按 onTap 同序：winPanel → bigIntro → adConfirm → pauseOverlay → 常规）
+    // game 场景（浮层按 onTap 同序：winPanel → failPanel → bigIntro → adConfirm → pauseOverlay → 常规）
     if (ctx.winPanel) {
       if (this.inRect(px, py, this.nextBtn)) return 'nextBtn';
       if (this.inRect(px, py, this.winBackBtn)) return 'winBackBtn';
+      return null;
+    }
+    if (ctx.failPanel) {
+      if (this.inRect(px, py, this.failReviveBtn)) return 'failReviveBtn';
+      if (this.inRect(px, py, this.failRestartBtn)) return 'failRestartBtn';
       return null;
     }
     if (ctx.bigIntro) return this.inRect(px, py, this.bigIntroBtn) ? 'bigIntroBtn' : null;
@@ -419,12 +427,14 @@ export default class Renderer {
     this.drawTopBar(state);
     this.drawShelf(state);
     this.drawBottles(state);
+    if (state.bombFlashIdx >= 0 && !state.failPanel) this.drawBombFlash(state); // 引爆红色闪光（PRD-玩法扩展 §2 B）
     this.drawBottomBar(state);
-    if (state.stuck && !state.winPanel && !state.anims.blocking()) {
+    if (state.stuck && !state.winPanel && !state.failPanel && !state.anims.blocking()) {
       this.drawStuckTip();
     }
     if (state.shuffleSelecting) this.drawShuffleHint();
-    if (state.winPanel) this.drawWinPanel(state);
+    if (state.failPanel) this.drawFailPanel(state);
+    else if (state.winPanel) this.drawWinPanel(state);
     else if (state.adConfirm) this.drawAdConfirm(state);
     else if (state.pauseOverlay) this.drawPauseOverlay();
     if (state.bigIntro) this.drawBigIntro(); // 特殊关首进引导浮层（最顶层）
@@ -667,6 +677,11 @@ export default class Renderer {
     ctx.font = 'bold 13px sans-serif';
     ctx.fillStyle = '#8A6234';
     ctx.fillText(`已通关 ${state.cleared} / ${this.levelCount} 关 · 通关解锁下一关`, this.W / 2, this.H * 0.09 + 26);
+    // 道具背包数量（PRD-道具背包）：纯文本行，与页面风格一致（无美术素材）
+    const inv = state.inv || { undo: 0, shuffle: 0, addBottle: 0 };
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillStyle = '#7A5C3E';
+    ctx.fillText(`道具　撤回 ×${inv.undo}　打乱 ×${inv.shuffle}　加瓶 ×${inv.addBottle}`, this.W / 2, this.H * 0.09 + 46);
 
     // 自适应列数（Q6=A）：宽屏 4 列，窄屏 3 列；30 关竖向滚动
     const cols = this.W >= 414 ? 4 : 3;
@@ -676,7 +691,7 @@ export default class Renderer {
     const cardW = (this.W - margin * 2 - (cols - 1) * gapX) / cols;
     const cardH = 62;
     const rows = Math.ceil(this.levelCount / cols);
-    const gridTop = this.H * 0.09 + 52;
+    const gridTop = this.H * 0.09 + 70;
     const availH = this.H - 60 - gridTop;
     const contentH = rows * cardH + (rows - 1) * gapY;
     this.levelScrollMax = Math.max(0, contentH - availH);
@@ -744,6 +759,15 @@ export default class Renderer {
         ctx.font = 'bold 12px sans-serif';
         ctx.fillText('挑战', x + cardW - 12, y + cardH / 2);
       }
+      // 已获星数（PRD-三星评价；纯文本，只读 state.best，锁定卡与无纪录卡不显示）
+      const rec = state.best && state.best[i + 1];
+      if (unlocked && rec && rec.stars) {
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#F5A623';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillText('★'.repeat(rec.stars) + '☆'.repeat(3 - rec.stars), x + cardW / 2, y + cardH - 8);
+        ctx.textAlign = 'right';
+      }
       ctx.textBaseline = 'alphabetic';
       ctx.restore(); // 卡片按下态变换收束
     }
@@ -805,7 +829,7 @@ export default class Renderer {
 
   drawAdConfirm(state) {
     const { ctx } = this;
-    const label = state.adConfirm === 'shuffle' ? '打乱' : '加瓶';
+    const label = { undo: '撤回', shuffle: '打乱', addBottle: '加瓶' }[state.adConfirm] || '道具';
     ctx.save();
     ctx.fillStyle = 'rgba(43, 28, 12, 0.5)';
     ctx.fillRect(0, 0, this.W, this.H);
@@ -1064,13 +1088,19 @@ export default class Renderer {
         }
       }
       if (pour && (pour.from === i || pour.to === i)) keyIdx = -1;
+      // 遮盖瓶（PRD-玩法扩展 §2 A）：内容对玩家不可见（按空瓶绘制瓶体），叠加纸袋遮罩
+      const covered = logic.isCovered && logic.isCovered(i);
       this.ctx.save();
       this.ctx.translate(cx + shakeX, bottom);
       this.ctx.rotate(angle);
       this.ctx.translate(-cx, -bottom);
       this.ctx.translate(0, -lift);
-      this.drawBottle(rect, layers, selected === i, !!flying, keyIdx, this.bottleCap(i));
-      this.ctx.restore();
+      this.drawBottle(rect, covered ? [] : layers, selected === i, !!flying, keyIdx, this.bottleCap(i));
+      // 特性组件与瓶子绑定：遮盖/炸弹/完成/锁角标在同一变换内绘制，随瓶抖动/倾斜/上浮一起动
+      if (covered) this.drawCoverMask(rect, logic.coverLeft());
+      // 炸弹瓶倒计时角标（PRD-玩法扩展 §2 B）：炸弹图标 + 剩余步数，临近引爆红色警示
+      const bombTimer = logic.bombTimerOf ? logic.bombTimerOf(i) : -1;
+      if (bombTimer >= 0) this.drawBombBadge(rect, bombTimer);
       // 满瓶完成标记：金色 ✓ 徽章叠加在瓶口（随后才起飞去货架）
       if (badge) this.drawCompleteBadge(rect, badge.t);
       // 锁瓶角标（R4/R5）：未解锁的锁瓶在瓶口上方绘制锁形 + 进度/钥匙提示（矢量）
@@ -1082,6 +1112,7 @@ export default class Renderer {
           else this.drawKeyLockBadge(rect);
         }
       }
+      this.ctx.restore();
     }
 
     // 倒水流线
@@ -1361,6 +1392,161 @@ export default class Renderer {
     ctx.lineTo(cx + s * 0.7, cy + s * 0.5); // 齿 2
   }
 
+  /** 遮盖瓶纸袋遮罩（PRD-玩法扩展 §2 A）：牛皮纸袋覆盖整瓶 + 中央剩余层数徽章。
+   *  程序化矢量绘制（交互提示类 UI，非美术素材占位；位图素材待美术走管线后替换此方法） */
+  drawCoverMask(rect, left) {
+    const { ctx } = this;
+    const { x, y, w, h } = rect;
+    // 只盖瓶身中段：露出瓶口/瓶颈/肩（上段）与瓶底圆弧线（下段），与瓶子三段式对齐
+    const sprite = this.images.bottle;
+    let topH = h * BOTTLE_TOP_FRAC, botH = h * BOTTLE_BOT_FRAC;
+    if (sprite) {
+      topH = sprite.height * BOTTLE_TOP_FRAC * (w / sprite.width);
+      botH = sprite.height * BOTTLE_BOT_FRAC * (w / sprite.width);
+    }
+    const bx = x + w * 0.04;
+    const bw = w * 0.92;
+    const by = y + topH * 0.92; // 上沿压住肩部下沿，瓶口/瓶颈可见
+    const bh = h - botH * 0.72 - (by - y); // 下沿收在瓶底圆弧线上方，底部线条可见
+    const r = w * 0.14;
+    ctx.save();
+    // 袋体（牛皮纸色）
+    ctx.fillStyle = '#C99C63';
+    this.rr(bx, by, bw, bh, r);
+    ctx.fill();
+    // 袋口折边（深色，含翻盖 V 形）
+    ctx.fillStyle = '#A87A46';
+    ctx.beginPath();
+    ctx.moveTo(bx, by + r);
+    ctx.quadraticCurveTo(bx, by, bx + r, by);
+    ctx.lineTo(bx + bw - r, by);
+    ctx.quadraticCurveTo(bx + bw, by, bx + bw, by + r);
+    ctx.lineTo(bx + bw, by + bh * 0.16);
+    ctx.lineTo(bx + bw / 2, by + bh * 0.28);
+    ctx.lineTo(bx, by + bh * 0.16);
+    ctx.closePath();
+    ctx.fill();
+    // 中缝折痕
+    ctx.strokeStyle = 'rgba(90, 58, 26, 0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(bx + bw / 2, by + bh * 0.30);
+    ctx.lineTo(bx + bw / 2, by + bh - 6);
+    ctx.stroke();
+    // 剩余层数徽章
+    const cx = bx + bw / 2;
+    const cy = by + bh * 0.58;
+    const br = Math.max(11, w * 0.26);
+    ctx.fillStyle = 'rgba(62, 42, 24, 0.92)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, br, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#FFF3DC';
+    ctx.font = `bold ${Math.round(br * 1.2)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(left), cx, cy + 1);
+    ctx.textBaseline = 'alphabetic';
+    ctx.restore();
+  }
+
+  /**
+   * 炸弹瓶倒计时角标（PRD-玩法扩展 §2 B）：炸弹图形 + 剩余步数数字；
+   * 剩余 ≤2 时底板转红 + 瓶身红色警示描边（呼吸脉冲）。
+   * 程序化矢量占位（交互提示类 UI，非美术素材；位图素材待美术走管线后替换此方法）
+   */
+  drawBombBadge(rect, left) {
+    const { ctx } = this;
+    const cx = rect.x + rect.w / 2;
+    const cy = rect.y - 4; // 底板下沿压住瓶口（与锁瓶角标同位口径）
+    const bw = Math.max(40, Math.min(56, rect.w + 18));
+    const bx = cx - bw / 2;
+    const urgent = left <= 2;
+    ctx.save();
+    // 底板
+    ctx.fillStyle = urgent ? 'rgba(178, 34, 24, 0.92)' : 'rgba(62, 42, 24, 0.88)';
+    this.rr(bx, cy - 10, bw, 20, 10);
+    ctx.fill();
+    // 炸弹图形：圆身 + 引线 + 火花
+    const gx = bx + 13;
+    const gy = cy + 1;
+    ctx.fillStyle = '#FFF6E8';
+    ctx.beginPath();
+    ctx.arc(gx, gy, 5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#FFD54F';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(gx + 3.5, gy - 3.5);
+    ctx.quadraticCurveTo(gx + 7, gy - 7, gx + 9, gy - 5);
+    ctx.stroke();
+    // 剩余步数
+    ctx.fillStyle = urgent ? '#FFE082' : '#FFF6E8';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(String(left), bx + 28, cy + 0.5);
+    ctx.textBaseline = 'alphabetic';
+    // 临近引爆警示：瓶身红色呼吸描边
+    if (urgent) {
+      ctx.strokeStyle = `rgba(229, 57, 53, ${(0.45 + 0.4 * Math.sin((Date.now() / 300) * Math.PI * 2)).toFixed(3)})`;
+      ctx.lineWidth = 2.5;
+      this.rr(rect.x - 1.5, rect.y - 1.5, rect.w + 3, rect.h + 3, rect.w * 0.2);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  /** 引爆反馈（PRD-玩法扩展 §2 B）：引爆瓶整瓶红色半透明覆盖，透明度随 failDelay 线性衰减 */
+  drawBombFlash(state) {
+    const r = this.bottleRects[state.bombFlashIdx];
+    if (!r) return;
+    const alpha = Math.max(0, 0.6 * (1 - (state.bombFlashT || 0) / 0.6));
+    if (alpha <= 0.01) return;
+    const { ctx } = this;
+    ctx.save();
+    ctx.fillStyle = `rgba(229, 57, 53, ${alpha.toFixed(3)})`;
+    this.rr(r.x - 2, r.y - 2, r.w + 4, r.h + 4, r.w * 0.2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /** 失败弹窗（PRD-玩法扩展 §2 B）：炸弹引爆 → 重开本关 / 看广告复活，风格与胜利/暂停面板一致 */
+  drawFailPanel(state) {
+    const { ctx } = this;
+    ctx.save();
+    ctx.fillStyle = 'rgba(43, 28, 12, 0.55)';
+    ctx.fillRect(0, 0, this.W, this.H);
+    const cw = 286;
+    const ch = 236;
+    const cx = (this.W - cw) / 2;
+    const cy = (this.H - ch) / 2 - 30;
+    ctx.fillStyle = '#FFF9F0';
+    this.rr(cx, cy, cw, ch, 18);
+    ctx.fill();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#B22218';
+    ctx.font = 'bold 24px sans-serif';
+    ctx.fillText('炸弹爆炸了！', this.W / 2, this.H / 2 - 96);
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillStyle = '#7A5C3E';
+    ctx.fillText('引信倒计时归零，果汁瓶被引爆', this.W / 2, this.H / 2 - 66);
+    this.drawTextButton(this.failReviveBtn, '看广告 · 复活', {
+      fill: '#FF9838',
+      text: '#FFFFFF',
+      size: 17,
+      pressed: this.pressed === 'failReviveBtn',
+    });
+    this.drawTextButton(this.failRestartBtn, '重开本关', {
+      fill: 'rgba(255,255,255,0.92)',
+      stroke: '#E8C9A0',
+      text: '#8A6234',
+      size: 16,
+      pressed: this.pressed === 'failRestartBtn',
+    });
+    ctx.restore();
+  }
+
   /** 条件锁瓶角标（R4）：锁形 + 完成进度「已完成/need」，矢量绘制 */
   drawCondLockBadge(rect, done, need) {
     const { ctx } = this;
@@ -1494,9 +1680,10 @@ export default class Renderer {
   drawBottomBar(state) {
     const { ctx } = this;
     const entries = [
-      [this.undoBtn, '撤回', state.logic.undoStack.length > 0, 0, 'iconUndo'],
-      [this.shuffleBtn, '打乱', state.props.shuffle > 0, state.props.shuffle, 'iconShuffle'],
-      [this.addBottleBtn, '加瓶', state.props.addBottle > 0, state.props.addBottle, 'iconAdd'],
+      // 道具化撤回（PRD-道具背包）：可撤 = 有步可撤 且 背包 undo 存量 > 0
+      [this.undoBtn, '撤回', state.logic.undoStack.length > 0 && state.inv.undo > 0, state.inv.undo, 'iconUndo'],
+      [this.shuffleBtn, '打乱', state.inv.shuffle > 0, state.inv.shuffle, 'iconShuffle'],
+      [this.addBottleBtn, '加瓶', state.inv.addBottle > 0, state.inv.addBottle, 'iconAdd'],
       [this.restartBtn, '重开', true, 0, 'iconRestart'],
     ];
     for (const [btn, label, enabled, uses, icon] of entries) {
@@ -1579,13 +1766,29 @@ export default class Renderer {
     ctx.fillStyle = '#7A4E1D';
     ctx.font = `bold ${titleSize}px sans-serif`;
     ctx.fillText(title, this.W / 2, cy + 58);
-    ctx.font = 'bold 15px sans-serif';
-    ctx.fillStyle = '#7A5C3E';
-    ctx.fillText(`本关共 ${state.logic.moveCount} 步`, this.W / 2, cy + 92);
+    // 星级 + 最佳纪录（PRD-三星评价；纯文本渲染，winStats 由胶水层结算产出，此处只读）
+    const ws = state.winStats;
+    if (ws) {
+      ctx.font = 'bold 22px sans-serif';
+      ctx.fillStyle = '#F5A623';
+      ctx.fillText('★'.repeat(ws.stars) + '☆'.repeat(3 - ws.stars), this.W / 2, cy + 90);
+      ctx.font = 'bold 15px sans-serif';
+      ctx.fillStyle = '#7A5C3E';
+      ctx.fillText(`本关共 ${ws.moves} 步 · 最佳 ${ws.bestMoves} 步`, this.W / 2, cy + 116);
+      if (ws.newRecord) {
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillStyle = '#F5A623';
+        ctx.fillText('（新纪录！）', this.W / 2, cy + 138);
+      }
+    } else {
+      ctx.font = 'bold 15px sans-serif';
+      ctx.fillStyle = '#7A5C3E';
+      ctx.fillText(`本关共 ${state.logic.moveCount} 步`, this.W / 2, cy + 92);
+    }
     // 双按钮（方案 A）：左「返回」回主菜单（视觉弱化），右主按钮进下一关 / 末关回第 1 关
     const back = this.winBackBtn;
     back.x = cx + 16;
-    back.y = cy + 126;
+    back.y = cy + 158;
     this.drawTextButton(back, '返回', {
       fill: 'rgba(255,255,255,0.92)',
       stroke: '#E8C9A0',
@@ -1595,7 +1798,7 @@ export default class Renderer {
     });
     const b = this.nextBtn;
     b.x = cx + 130;
-    b.y = cy + 126;
+    b.y = cy + 158;
     b.w = 140;
     b.h = 46;
     this.drawTextButton(b, isLast ? '回到第 1 关' : '下一关', {

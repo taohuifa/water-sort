@@ -1,5 +1,7 @@
 import GameLogic from './core/game.js';
 import { buildLevelsFromConfig, parseJsonc, COLORS } from './core/levels.js';
+import { applyGrant, canConsume, consume, mergeInventory } from './core/inventory.js';
+import { calcStars, mergeRecord, sanitizeRecord } from './core/stars.js';
 import Renderer from './render/renderer.js';
 import Anims from './render/anims.js';
 import Audio from './render/audio.js';
@@ -8,6 +10,9 @@ import Ads from './runtime/ads.js';
 const CLEARED_KEY = 'juicesort_cleared'; // 已通关关数（解锁进度）
 const SOUND_KEY = 'juicesort_sound'; // 音效开关
 const INTRO_KEY = 'juicesort_big_intro'; // 特殊关首进引导已读标志（R8/S-10）
+const INV_KEY = 'juicesort_inventory'; // 全局道具背包（PRD-道具背包）
+const GRANT_KEY = 'juicesort_granted'; // 首入赠送已发放标记（{[关卡号]: true}）
+const BEST_KEY = 'juicesort_best'; // 每关最佳纪录（{[关卡号]: {bestMoves, stars}}，PRD-三星评价）
 // 配置文件用 .json 扩展名（微信代码包读取白名单要求），内容为 JSONC（带注释），
 // 加载时由 parseJsonc 剥离注释
 const LEVEL_CONFIG_PATH = 'assets/config/levels.json'; // 关卡难度曲线配置
@@ -73,9 +78,15 @@ export default class Main {
     this.selected = -1;
     this.winPanel = false;
     this.winDelay = 0;
+    this.failPanel = false; // 失败弹窗（PRD-玩法扩展 §2 B：重开 / 广告复活）
+    this.failDelay = 0; // 引爆闪光累计时长（0.6s 后弹失败面板）
+    this.failFlashIdx = -1; // 引爆瓶下标（-1 = 无闪光）
     this.scene = 'menu'; // 'menu' | 'settings' | 'levelSelect' | 'game'
     this.pauseOverlay = false;
-    this.props = { shuffle: 1, addBottle: 1 }; // 道具剩余次数（每关重置）
+    this.inv = mergeInventory(wx.getStorageSync(INV_KEY)); // 全局道具背包（PRD-道具背包，废除每关出厂 props）
+    this.granted = this._readGranted(); // 首入赠送已发放标记
+    this.best = this._readBest(); // 每关最佳纪录（PRD-三星评价，{[关卡号]: {bestMoves, stars}}）
+    this.winStats = null; // 本次通关结算态 {moves, stars, bestMoves, newRecord}（loadLevel 时清零）
     this.adConfirm = null; // 广告补给确认浮层：null | 'shuffle' | 'addBottle'
     this.shuffleSelecting = false; // 打乱选瓶模式：点瓶打乱其层序
     this.bigIntro = false; // 特殊关首进引导浮层（本机已读后不再弹出）
@@ -127,13 +138,89 @@ export default class Main {
     this.selected = -1;
     this.winPanel = false;
     this.winDelay = 0;
-    this.props = { ...LEVELS[idx].props }; // 道具每关按曲线注入（≥10 关出厂 0，仅广告补给）
+    this.failPanel = false; // 失败流程态随关卡重置（PRD-玩法扩展 §2 B）
+    this.failDelay = 0;
+    this.failFlashIdx = -1;
     this.shuffleSelecting = false;
+    this.winStats = null; // 新局清空上一局结算态（PRD-三星评价）
     this.logic.loadLevel(LEVELS[idx]);
+    this._grantFirstEntry(idx); // 首入赠送（解锁后第一次进入，防重复发放）
     this.refreshBoard(); // 容量/大瓶参数化布局
     this.renderer.displayedCompleted = 0;
     // 特殊关首进引导（本机已读不再弹，重置进度后恢复，R8/AC-12）
     this.bigIntro = !!LEVELS[idx].special && !this.bigIntroShown;
+  }
+
+  // ---------- 道具背包（PRD-道具背包，账本与持久化归胶水层，core 只管局面） ----------
+
+  /** 读首入赠送标记存档（旧档无此 key / 值非法时回退空表） */
+  _readGranted() {
+    try {
+      const saved = wx.getStorageSync(GRANT_KEY);
+      return saved && typeof saved === 'object' ? saved : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  /** 背包持久化（每次发放 / 消耗 / 广告补给后调用） */
+  saveInventory() {
+    try {
+      wx.setStorageSync(INV_KEY, this.inv);
+    } catch (e) { /* storage 不可用时静默（背包仍在内存生效） */ }
+  }
+
+  /** 首入赠送：该关配置了 grant 且未发放过 → 叠加进背包，记录并持久化（一次性） */
+  _grantFirstEntry(idx) {
+    const lv = LEVELS[idx];
+    const no = lv.level;
+    if (this.granted[no] || !lv.grant) return;
+    this.inv = applyGrant(this.inv, lv.grant);
+    this.granted[no] = true;
+    // 写序（F-03「宁重发不吞发」）：先写库存、后写标记 —— 两写之间中断时，
+    // 下次进关会重发（可接受），而不是标记在先导致赠送被吞（不可接受）
+    this.saveInventory();
+    try {
+      wx.setStorageSync(GRANT_KEY, this.granted);
+    } catch (e) { /* 同上 */ }
+  }
+
+  // ---------- 三星评价（PRD-玩法扩展 §2 C：账本与持久化归胶水层，星级计算归 core） ----------
+
+  /** 读最佳纪录存档（旧档无此 key / 条目非法时逐条清洗剔除） */
+  _readBest() {
+    const out = {};
+    try {
+      const saved = wx.getStorageSync(BEST_KEY);
+      if (saved && typeof saved === 'object') {
+        for (const no of Object.keys(saved)) {
+          const rec = sanitizeRecord(saved[no]);
+          if (rec) out[no] = rec;
+        }
+      }
+    } catch (e) { /* storage 不可用时静默（空表起局） */ }
+    return out;
+  }
+
+  /** 通关结算（winPanel 弹出时机调用）：算星级 + 更新最佳纪录（更优才写档） */
+  _recordResult() {
+    const lv = LEVELS[this.levelIndex];
+    const moves = this.logic.moveCount;
+    const stars = calcStars(moves, lv.par);
+    const no = lv.level;
+    const merged = mergeRecord(this.best[no] || null, moves, stars);
+    this.winStats = {
+      moves,
+      stars,
+      bestMoves: merged ? merged.bestMoves : this.best[no].bestMoves,
+      newRecord: !!merged,
+    };
+    if (merged) {
+      this.best[no] = merged;
+      try {
+        wx.setStorageSync(BEST_KEY, this.best);
+      } catch (e) { /* storage 不可用时静默（纪录仍在内存生效） */ }
+    }
   }
 
   /** 按当前逻辑局面的瓶数/容量/大瓶参数重算布局（loadLevel / undo / addBottle 共用，S-08） */
@@ -169,6 +256,7 @@ export default class Main {
       this.renderer.pressed = this.renderer.hitButton(t.clientX, t.clientY, {
         scene: this.scene,
         winPanel: this.winPanel,
+        failPanel: this.failPanel,
         bigIntro: this.bigIntro,
         adConfirm: this.adConfirm,
         pauseOverlay: this.pauseOverlay,
@@ -261,6 +349,18 @@ export default class Main {
       return;
     }
 
+    // 失败弹窗（PRD-玩法扩展 §2 B）：重开本关 / 看广告复活（开发模式直接发放）
+    if (this.failPanel) {
+      if (this.renderer.inRect(x, y, this.renderer.failRestartBtn)) {
+        this.audio.play('button');
+        this.loadLevel(this.levelIndex); // 重开：bombs/timers 随关卡重建
+      } else if (this.renderer.inRect(x, y, this.renderer.failReviveBtn)) {
+        this.audio.play('button');
+        this.ads.watch(() => this.revive());
+      }
+      return;
+    }
+
     // 特殊关首进引导浮层（点「开始挑战」关闭并记住已读；期间屏蔽其他输入）
     if (this.bigIntro) {
       if (this.renderer.inRect(x, y, this.renderer.bigIntroBtn)) {
@@ -279,9 +379,11 @@ export default class Main {
         this.adConfirm = null;
         this.audio.play('button');
         // 看激励视频补充道具（开发模式直接发放）
+        const label = { undo: '撤回', shuffle: '打乱', addBottle: '加瓶' }[type] || type;
         this.ads.watch(() => {
-          this.props[type]++;
-          this.renderer.showToast(type === 'shuffle' ? '已补充 1 次打乱' : '已补充 1 次加瓶');
+          this.inv[type] = (this.inv[type] || 0) + 1;
+          this.saveInventory();
+          this.renderer.showToast(`已补充 1 次${label}`);
         });
       } else if (this.renderer.inRect(x, y, this.renderer.adConfirmCancelBtn)) {
         this.adConfirm = null;
@@ -359,12 +461,16 @@ export default class Main {
     this.renderer.showToast(this.soundOn ? '音效已开启' : '音效已关闭');
   }
 
-  /** 清除关卡存档，解锁进度归零；特殊关引导已读标志一并重置（AC-12） */
+  /** 清除关卡存档，解锁进度归零；特殊关引导已读标志、最佳星数纪录与首入赠送标记一并重置（AC-12；背包资产保留） */
   resetProgress() {
     wx.removeStorageSync(CLEARED_KEY);
     wx.removeStorageSync(INTRO_KEY);
+    wx.removeStorageSync(BEST_KEY);
+    wx.removeStorageSync(GRANT_KEY); // 赠送标记重置：章首/每 5 关赠送可重新获得（F-04 用户拍板口径）
     this.cleared = 0;
     this.bigIntroShown = false;
+    this.best = {};
+    this.granted = {};
     this.renderer.showToast('已重置，将从第 1 关开始');
   }
 
@@ -412,8 +518,24 @@ export default class Main {
   tapBottle(idx) {
     const { logic } = this;
 
+    // 失败态：禁止瓶子操作（除撤回/重开，PRD-玩法扩展 §2 B），反馈与锁定瓶同级
+    if (logic.isFailed()) {
+      this.audio.play('invalid');
+      this.anims.addShake(idx);
+      this.selected = -1;
+      return;
+    }
+
     // 锁定瓶：不可选中/切换选中，播放非法反馈（R4/R5 锁瓶交互）
     if (logic.isLocked(idx)) {
+      this.audio.play('invalid');
+      this.anims.addShake(idx);
+      this.selected = -1;
+      return;
+    }
+
+    // 遮盖瓶：未揭示不可选中/交互，非法反馈与锁定瓶同级（PRD-玩法扩展 §2 A）
+    if (logic.isCovered(idx)) {
       this.audio.play('invalid');
       this.anims.addShake(idx);
       this.selected = -1;
@@ -505,8 +627,16 @@ export default class Main {
     });
   }
 
+  /** 撤回（道具化）：消耗背包 undo 1 个；耗尽转广告补给点位；undoStack 空时无效 */
   undo() {
+    if (!canConsume(this.inv, 'undo')) {
+      if (this.logic.undoStack.length > 0) this.adConfirm = 'undo';
+      return;
+    }
+    if (this.logic.undoStack.length === 0) return;
     if (this.logic.undo()) {
+      consume(this.inv, 'undo');
+      this.saveInventory();
       this.selected = -1;
       this.renderer.displayedCompleted = this.logic.completed.length;
       // 加瓶/撤加瓶会改变瓶数，布局需重算（幂等）
@@ -520,7 +650,11 @@ export default class Main {
    */
   useShuffle() {
     if (this.anims.blocking()) return;
-    if (this.props.shuffle <= 0) {
+    if (this.logic.isFailed()) {
+      this.audio.play('invalid'); // 失败态点击反馈（与 tapBottle 口径一致，F-02）
+      return;
+    }
+    if (!canConsume(this.inv, 'shuffle')) {
       this.adConfirm = 'shuffle';
       return;
     }
@@ -529,11 +663,12 @@ export default class Main {
     this.renderer.showToast(this.shuffleSelecting ? '点选一个瓶子，打乱它的层次' : '已取消打乱');
   }
 
-  /** 执行选瓶打乱（失败则保持选择态，可换瓶重试） */
+  /** 执行选瓶打乱（失败则保持选择态，可换瓶重试；成功才扣背包） */
   applyShuffleOne(idx) {
     if (this.logic.shuffleOne(idx)) {
       this.audio.play('button');
-      this.props.shuffle--;
+      consume(this.inv, 'shuffle');
+      this.saveInventory();
       this.shuffleSelecting = false;
       this.renderer.showToast('已打乱该瓶');
     } else {
@@ -545,17 +680,42 @@ export default class Main {
   /** 道具·加瓶子（用尽后转为广告补给点位） */
   useAddBottle() {
     if (this.anims.blocking()) return;
-    if (this.props.addBottle <= 0) {
+    if (this.logic.isFailed()) {
+      this.audio.play('invalid'); // 失败态点击反馈（与 tapBottle 口径一致，F-02）
+      return;
+    }
+    if (!canConsume(this.inv, 'addBottle')) {
       this.adConfirm = 'addBottle';
       return;
     }
     if (this.logic.addBottle()) {
       this.audio.play('button');
-      this.props.addBottle--;
+      consume(this.inv, 'addBottle');
+      this.saveInventory();
       this.selected = -1;
       this.refreshBoard();
       this.renderer.showToast('已增加一个空瓶');
     }
+  }
+
+  /**
+   * 广告复活（PRD-玩法扩展 §2 B）：回退最多 3 步（undo×3，栈不足回退全部；不走背包 undo 账本——
+   * 回退是广告换的复活效果本身）+ 重置所有未拆除炸弹倒计时为初值，继续游戏。
+   */
+  revive() {
+    let n = 0;
+    while (n < 3 && this.logic.undoStack.length > 0) {
+      this.logic.undo();
+      n++;
+    }
+    this.logic.resetBombs();
+    this.failPanel = false;
+    this.failDelay = 0;
+    this.failFlashIdx = -1;
+    this.selected = -1;
+    this.renderer.displayedCompleted = this.logic.completed.length;
+    this.refreshBoard(); // 幂等（复活不改变瓶数，防御性刷新）
+    this.renderer.showToast('复活成功！炸弹引信已重置');
   }
 
   // ---------- 主循环 ----------
@@ -572,9 +732,25 @@ export default class Main {
     const R = this.renderer;
     const cRect = (b) => (b ? [Math.round(b.x + b.w / 2), Math.round(b.y + b.h / 2)] : null);
     const cCircle = (b) => (b ? [Math.round(b.x), Math.round(b.y)] : null);
+    const moves = this.logic.moveCount;
+    const par = (LEVELS[this.levelIndex] || {}).par || 0;
+    const stars = this.winStats ? this.winStats.stars : 0; // 结算星级（PRD-三星评价）
+    // 遮盖瓶（PRD-玩法扩展 §2 A）：与 bottles 平行的遮盖摘要（未揭示瓶 = 剩余层数，其余 0）
+    // + 解封计数器（= 已收集成品数）；二者入签名，揭示瞬间即写
+    const covers = this.logic.bottles.map((_, i) => (this.logic.isCovered(i) ? this.logic.coverLeft() : 0));
+    const completedCount = this.logic.completed.length;
+    // 炸弹瓶（PRD-玩法扩展 §2 B）：与 bottles 平行的炸弹摘要（活跃炸弹 = 剩余步数，其余 0）+ 失败态
+    const bombs = this.logic.bottles.map((_, i) => {
+      const t = this.logic.bombTimerOf(i);
+      return t >= 0 ? t : 0;
+    });
+    const fail = this.failPanel;
     const sig = [this.scene, this.pauseOverlay, this.levelIndex, this.selected,
       this.winPanel, this.adConfirm, this.shuffleSelecting, this.cleared,
-      this.bigIntro, R.levelScroll].join('|');
+      this.bigIntro, R.levelScroll,
+      this.inv.undo, this.inv.shuffle, this.inv.addBottle,
+      moves, par, stars, covers.join(','), completedCount,
+      bombs.join(','), fail].join('|');
     const now = Date.now();
     if (sig === this._dbgSig && now - this._dbgTs < 2000) return;
     this._dbgSig = sig;
@@ -584,6 +760,10 @@ export default class Main {
         scene: this.scene, pause: this.pauseOverlay, level: this.levelIndex,
         sel: this.selected, win: this.winPanel, ad: this.adConfirm,
         shuf: this.shuffleSelecting, cleared: this.cleared, intro: this.bigIntro, t: now,
+        invUndo: this.inv.undo, invShuffle: this.inv.shuffle, invAddBottle: this.inv.addBottle,
+        moves, par, stars, // 三星评价：当前步数 / 关卡 par / 结算星级（非结算态 0）
+        covers, completedCount, // 遮盖瓶：各瓶剩余遮盖层数摘要（0=无遮盖或已揭示）/ 解封计数器
+        bombs, fail, // 炸弹瓶：各瓶剩余引信摘要（0=无炸弹或已拆除）/ 失败弹窗态
         btns: {
           play: {xy: cRect(R.menuPlayBtn), scenes: ['menu']},
           settings: {xy: cRect(R.menuSettingsBtn), scenes: ['menu']},
@@ -592,6 +772,8 @@ export default class Main {
           pause_exit: {xy: cRect(R.pauseExitBtn), scenes: ['game'], when: {pause: true}},
           next: {xy: cRect(R.nextBtn), scenes: ['game'], when: {win: true}},
           win_back: {xy: cRect(R.winBackBtn), scenes: ['game'], when: {win: true}},
+          fail_revive: {xy: cRect(R.failReviveBtn), scenes: ['game'], when: {fail: true}},
+          fail_restart: {xy: cRect(R.failRestartBtn), scenes: ['game'], when: {fail: true}},
           undo: {xy: cCircle(R.undoBtn), scenes: ['game']},
           shuffle: {xy: cCircle(R.shuffleBtn), scenes: ['game']},
           add_bottle: {xy: cCircle(R.addBottleBtn), scenes: ['game']},
@@ -628,6 +810,7 @@ export default class Main {
       if (this.winDelay > 0.45) {
         this.winPanel = true;
         this.audio.play('win');
+        this._recordResult(); // 三星结算：算星级 + 更新最佳纪录（更优才写档）
         // 记录解锁进度：打通本关才能挑战下一关
         const newCleared = Math.min(this.levelIndex + 1, LEVEL_COUNT);
         if (newCleared > this.cleared) {
@@ -637,6 +820,27 @@ export default class Main {
       }
     }
 
+    // 失败判定（PRD-玩法扩展 §2 B）：任一未拆除炸弹倒计时归零 → 引爆瓶红色闪光 0.6s → 失败弹窗
+    if (this.scene === 'game' && !this.winPanel && this.logic.isFailed()) {
+      if (this.failFlashIdx < 0) {
+        this.failFlashIdx = this.logic.bombBottles.findIndex(
+          (bi, k) => !this.logic.bombDefused[k] && this.logic.bombTimers[k] <= 0
+        );
+        this.failDelay = 0;
+        this.audio.play('invalid'); // 引爆音（暂复用非法音，待音频侧补充爆炸音）
+      }
+      // 动画与暂停期间不推进弹窗计时（与通关面板同口径）
+      if (!this.pauseOverlay && this.anims.allDone()) {
+        this.failDelay += dt;
+        if (this.failDelay > 0.6) this.failPanel = true;
+      }
+    } else if (this.failFlashIdx >= 0 && !this.logic.isFailed()) {
+      // 玩家在 0.6s 闪光窗口内撤销（或复活）解除了失败态 → 复位闪光态，
+      // 消除引爆瓶永久残影，并让下次引爆闪光正常记录新下标/新时长（F-01）
+      this.failFlashIdx = -1;
+      this.failDelay = 0;
+    }
+
     this.renderer.draw({
       scene: this.scene,
       pauseOverlay: this.pauseOverlay,
@@ -644,14 +848,19 @@ export default class Main {
       soundOn: this.soundOn,
       cleared: this.cleared,
       hasProgress: this.cleared > 0,
-      props: this.props,
+      inv: this.inv, // 全局道具背包（PRD-道具背包；渲染层只读显示）
+      best: this.best, // 每关最佳纪录（PRD-三星评价；渲染层只读显示）
       logic: this.logic,
       selected: this.selected,
       anims: this.anims,
       winPanel: this.winPanel,
+      winStats: this.winStats, // 三星结算态（PRD-三星评价；渲染层只读显示）
+      failPanel: this.failPanel, // 失败弹窗（PRD-玩法扩展 §2 B；渲染层只读显示）
+      bombFlashIdx: this.failFlashIdx, // 引爆闪光瓶下标（-1 = 无）
+      bombFlashT: this.failDelay, // 闪光已持续时长（透明度衰减用）
       levelIndex: this.levelIndex,
       shuffleSelecting: this.shuffleSelecting,
-      stuck: this.scene === 'game' && !this.logic.hasAnyMove(),
+      stuck: this.scene === 'game' && !this.logic.isFailed() && !this.logic.hasAnyMove(),
       bigIntro: this.bigIntro,
       specials: SPECIAL_FLAGS,
     });

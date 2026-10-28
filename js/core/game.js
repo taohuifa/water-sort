@@ -32,6 +32,17 @@ export default class GameLogic {
     this.caps = []; // 与 bottles 平行的每瓶容量数组（仅混合关填充，其余关为空）
     this.bigColor = -1; // 大瓶限定收集色（瓶口颜色限制：只收该颜色，普通关 -1）
     this.maxBottles = 12; // 加瓶上限（配置可覆盖：levels.json defaults/levels[n].maxBottles）
+    // 遮盖瓶（PRD-玩法扩展 §2 A）：coverBottles = 开局遮盖瓶下标（生成期恒定，不入快照）；
+    // 剩余层数由已完成成品数派生（coverLeft = max(0, coverLayers - completed.length)），随局面可复算
+    this.coverBottles = [];
+    this.coverLayers = 0; // 每瓶遮盖层数（0 = 本关无遮盖）
+    // 炸弹瓶（PRD-玩法扩展 §2 B）：bombTimers/bombDefused 为真实状态（受操作历史影响，不可派生），
+    // 随 undoStack 记录（bombsBefore）回滚；失败态 failed 由倒计时实时派生（isFailed），无独立快照字段
+    this.bombBottles = []; // 开局炸弹瓶下标（生成期恒定，不入快照）
+    this.bombMoves = 0; // 倒计时初值（0 = 本关无炸弹）
+    this.bombTimers = []; // 与 bombBottles 平行的剩余步数
+    this.bombDefused = []; // 与 bombBottles 平行的拆除标记（倒空即永久拆除）
+    this.lastGenSolLen = -1; // 最近一次生成接受局面的启发式解长（解长约束断言/工具回填用）
   }
 
   /** 载入关卡（同 seed 局面完全一致，可复现）。新参数全部可选，缺省保持旧行为 */
@@ -49,6 +60,11 @@ export default class GameLogic {
     bigCapacity = 0,
     mix = false,
     maxBottles = 12,
+    coverCount = 0,
+    coverLayers = 2,
+    bombCount = 0,
+    bombMoves = 0,
+    level = 0, // 关卡号（仅生成告警定位用，不参与生成逻辑）
   }) {
     this.capacity = capacity;
     this.maxBottles = maxBottles;
@@ -82,10 +98,23 @@ export default class GameLogic {
         condLockNeed,
         keyLockCount,
         hiddenCount,
+        coverCount,
+        coverLayers,
+        bombCount,
+        bombMoves,
+        level,
       });
     }
     this.bottles = gen.bottles;
     this.locks = gen.locks;
+    // 遮盖瓶（PRD-玩法扩展 §2 A）：仅普通关管线产出；special/mix 关 gen 无 covers 字段 → 空
+    this.coverBottles = gen.covers || [];
+    this.coverLayers = this.coverBottles.length > 0 ? coverLayers : 0;
+    // 炸弹瓶（PRD-玩法扩展 §2 B）：仅普通关管线产出；bombMoves 由生成确定（显式配置或自动口径）
+    this.bombBottles = gen.bombs || [];
+    this.bombMoves = this.bombBottles.length > 0 ? gen.bombMoves || 0 : 0;
+    this.bombTimers = this.bombBottles.map(() => this.bombMoves);
+    this.bombDefused = this.bombBottles.map(() => false);
     this.unlocked = gen.locks.map(() => false);
     this._revealTops();
     this.completed = [];
@@ -113,18 +142,26 @@ export default class GameLogic {
       condLockNeed = 2,
       keyLockCount = 0,
       hiddenCount = 0,
+      coverCount = 0,
+      coverLayers = 2,
+      bombCount = 0,
+      bombMoves = 0,
+      level = 0,
     } = opts;
     const nodeLimit = this.capacity >= 5 ? 200000 : 60000; // nodeLimit 随容量配置化（Q8=B）
     const deadline = Date.now() + 5000; // 单关生成总耗时预算
     const MAX_ATTEMPTS = 20000; // 防御性硬上限（正常预算内远达不到）
-    let last = { bottles: [], locks: [] };
+    let last = { bottles: [], locks: [], covers: [], bombs: [], bombMoves: 0 };
     this.lastGenSolvable = false;
+    this.lastGenSolLen = -1;
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
       if (attempt > 0 && Date.now() > deadline) break;
       const dealSeed = seed + attempt * 997;
       const rng = new Rng(dealSeed); // 与打散同 rng 序列（同 seed 可复现；重试随 attempt 变化）
       let locks = [];
       let keyLayer = null;
+      let covers = [];
+      let bombs = [];
       let bottles;
       if (noEmptyStart) {
         // 散打关：③ 打散先定瓶装量 → 机制延后（锁按实际装量，隐藏 _markHidden）
@@ -132,7 +169,14 @@ export default class GameLogic {
         const post = this._placeMechanismsPostDeal(rng, bottles, { condLockCount, condLockNeed, keyLockCount });
         locks = post.locks;
         keyLayer = post.keyLayer;
-        if (hiddenCount > 0) this._markHidden(bottles, hiddenCount, dealSeed + 31, keyLayer);
+        // 遮盖瓶（PRD-玩法扩展 §2 A）：打散后按实际锁位补选（非空瓶，避开锁瓶/钥匙瓶），
+        // 隐藏标记排除遮盖瓶（遮盖瓶内不放 hidden 层）
+        covers = this._pickCoverBottles(bottles, coverCount, locks, keyLayer, rng, level);
+        if (hiddenCount > 0) {
+          this._markHidden(bottles, hiddenCount, dealSeed + 31, keyLayer, new Set(covers));
+        }
+        // 炸弹瓶（PRD-玩法扩展 §2 B）：遮盖/隐藏标记后补选（排除含隐藏层瓶，瓶级零重叠）
+        bombs = this._pickBombBottles(bottles, bombCount, locks, keyLayer, covers, rng, level);
       } else {
         // 标准关：② 机制位置（结构已知 = 前 colors 瓶满 + empties 空）→ ③ 打散 → 应用隐藏编码
         const mech = this._placeMechanisms(rng, {
@@ -141,40 +185,142 @@ export default class GameLogic {
           condLockNeed,
           keyLockCount,
           hiddenCount,
+          coverCount,
         });
         locks = mech.locks;
         keyLayer = mech.keyLayer;
+        covers = mech.covers || [];
         bottles = this._dealStandard(colors, empties, rng);
         if (mech.hiddenSlots) {
           for (const [bi, li] of mech.hiddenSlots) bottles[bi][li] = -(bottles[bi][li] + 1);
         }
+        // 炸弹瓶（PRD-玩法扩展 §2 B）：内容瓶中选，避开锁瓶/钥匙瓶/遮盖瓶/隐藏瓶（v1 信息不叠加）。
+        // 独立 rng 流（dealSeed + 53，与 _markHidden 的 dealSeed+31 同思路）——不扰动主洗牌序列，
+        // 既有局面（含 seed 固化关）零扰动，par 不变
+        if (bombCount > 0) {
+          const bombRng = new Rng(dealSeed + 53);
+          const hiddenBottles = new Set((mech.hiddenSlots || []).map(([bi]) => bi));
+          const bombCands = [];
+          for (let bi = 0; bi < colors; bi++) {
+            if (locks.some((l) => l.bottle === bi)) continue;
+            if (keyLayer && bi === keyLayer.bottle) continue;
+            if (covers.includes(bi)) continue;
+            if (hiddenBottles.has(bi)) continue;
+            bombCands.push(bi);
+          }
+          for (let i = 0; i < bombCount && bombCands.length > 0; i++) {
+            bombs.push(bombCands.splice(bombRng.int(bombCands.length), 1)[0]);
+          }
+        }
       }
       // ④ 验证：开局不允许直接存在已完成的满瓶纯色
       if (bottles.some((b) => this._isFullMono(b))) {
-        last = { bottles, locks };
+        last = { bottles, locks, covers, bombs, bombMoves: 0 };
         continue;
       }
       const lockInfo = {
-        condLocks: locks.filter((l) => l.type === 'cond'),
-        keyLocks: locks.filter((l) => l.type === 'key'), // 求解器精确模拟钥匙倒出
+        // 求解器精确模拟钥匙倒出
+        keyLocks: locks.filter((l) => l.type === 'key'),
+        // 条件锁 + 遮盖伪锁同通道（PRD-玩法扩展 §2 A）：遮盖解封与条件锁解锁同构
+        // （完成 N 瓶成品揭示），复用 condLock 语义保证「coverLeft > 0 的瓶不可操作」
+        condLocks: locks
+          .filter((l) => l.type === 'cond')
+          .concat(covers.map((b) => ({ bottle: b, type: 'cond', need: coverLayers }))),
       };
-      last = { bottles, locks };
-      // 带锁求解器验证局面必有解
+      last = { bottles, locks, covers, bombs, bombMoves: 0 };
+      // 带锁/带遮盖求解器验证局面必有解
       if (this._solvable(bottles, nodeLimit, null, lockInfo)) {
+        // 炸弹解长约束（PRD-玩法扩展 §2 B）：解长 ≤ bombMoves - 2（安全余量）。
+        // 通关必清空所有瓶 → 可行解路径中途必不引爆，约束即完整约束，求解器无需建模引爆。
+        // 胜利条件已由 _solvable 验证，此处用其启发式解长（par 上界）做廉价校准：
+        let bm = bombMoves;
+        if (bombCount > 0) {
+          const solLen = Math.max(1, this._lastSolLen);
+          if (bm > 0) {
+            if (solLen > bm - 2) continue; // 显式配置余量不足 → 换 seed 重洗
+          } else {
+            // 自动口径：解长 + 余量 4，向下不小于 8（par ≤ 启发式解长 → par ≤ bm - 4，方向偏松）
+            bm = Math.max(8, solLen + 4);
+          }
+        }
         this.lastGenSolvable = true;
-        return { bottles, locks, keyLayer };
+        this.lastGenSolLen = this._lastSolLen;
+        return { bottles, locks, keyLayer, covers, bombs, bombMoves: bm };
       }
     }
     // 兜底：全部尝试失败的概率极低；返回最后一次（keyLayer 置空避免隐藏误标）
     if (!this.lastGenSolvable) console.warn('[game] 关卡生成 5s 预算内未验证出可解局面，兜底返回最后尝试（存在不可解风险）');
-    return { bottles: last.bottles, locks: last.locks, keyLayer: null };
+    // 炸弹关兜底防御（F-06）：解长约束未通过验证 → bombMoves 放大为 lastSolLen + 4（解长可得时），
+    // 保证兜底局面不违反「解长 ≤ bombMoves − 2」安全余量
+    let bm = last.bombMoves || bombMoves;
+    if (last.bombs.length > 0 && this._lastSolLen > 0) {
+      bm = Math.max(bm, this._lastSolLen + 4);
+    }
+    return {
+      bottles: last.bottles,
+      locks: last.locks,
+      keyLayer: null,
+      covers: last.covers,
+      bombs: last.bombs,
+      bombMoves: bm,
+    };
+  }
+
+  /**
+   * 遮盖瓶选取（散打关用，PRD-玩法扩展 §2 A）：候选 = 非空瓶 − 锁瓶 − 钥匙瓶，
+   * rng 驱动可复现。标准关遮盖位在 _placeMechanisms 内随机制位置统一选取。
+   */
+  _pickCoverBottles(bottles, coverCount, locks, keyLayer, rng, level = 0) {
+    if (coverCount <= 0) return [];
+    const cands = [];
+    for (let bi = 0; bi < bottles.length; bi++) {
+      if (bottles[bi].length === 0) continue;
+      if (locks.some((l) => l.bottle === bi)) continue;
+      if (keyLayer && bi === keyLayer.bottle) continue;
+      cands.push(bi);
+    }
+    const covers = [];
+    for (let i = 0; i < coverCount && cands.length > 0; i++) {
+      covers.push(cands.splice(rng.int(cands.length), 1)[0]);
+    }
+    // 防御性告警（F-05）：候选不足按实际上限截断（不炸游戏），提示配置疑似少配
+    if (covers.length < coverCount) {
+      console.warn(`[game] L${level} coverCount=${coverCount} 候选不足，实际遮盖 ${covers.length} 瓶（请检查 levels.json 配置）`);
+    }
+    return covers;
+  }
+
+  /**
+   * 炸弹瓶选取（散打关用，PRD-玩法扩展 §2 B）：候选 = 非空瓶 − 锁瓶 − 钥匙瓶 − 遮盖瓶 − 隐藏瓶，
+   * rng 驱动可复现。标准关炸弹位在 _placeMechanisms 内随机制位置统一选取。
+   */
+  _pickBombBottles(bottles, bombCount, locks, keyLayer, covers, rng, level = 0) {
+    if (bombCount <= 0) return [];
+    const cands = [];
+    for (let bi = 0; bi < bottles.length; bi++) {
+      if (bottles[bi].length === 0) continue;
+      if (bottles[bi].some((c) => c < 0)) continue; // 含隐藏层瓶不重叠（v1 信息不叠加）
+      if (locks.some((l) => l.bottle === bi)) continue;
+      if (keyLayer && bi === keyLayer.bottle) continue;
+      if (covers.includes(bi)) continue;
+      cands.push(bi);
+    }
+    const bombs = [];
+    for (let i = 0; i < bombCount && cands.length > 0; i++) {
+      bombs.push(cands.splice(rng.int(cands.length), 1)[0]);
+    }
+    // 防御性告警（F-05）：候选不足按实际上限截断（不炸游戏），提示配置疑似少配
+    if (bombs.length < bombCount) {
+      console.warn(`[game] L${level} bombCount=${bombCount} 候选不足，实际炸弹 ${bombs.length} 瓶（请检查 levels.json 配置）`);
+    }
+    return bombs;
   }
 
   /**
    * 机制位置放置（阶段②，标准关）：仅依赖瓶结构（前 colors 瓶满 + empties 空），
    * 不依赖液体颜色。返回 hiddenSlots = [[瓶下标, 层下标]]，由调用方在 ③ 打散后应用负编码。
    */
-  _placeMechanisms(rng, { colors, condLockCount = 0, condLockNeed = 2, keyLockCount = 0, hiddenCount = 0 }) {
+  _placeMechanisms(rng, { colors, condLockCount = 0, condLockNeed = 2, keyLockCount = 0, hiddenCount = 0, coverCount = 0 }) {
     const locks = [];
     let keyLayer = null;
     // 条件锁瓶（方案 B）：内容瓶中选
@@ -199,9 +345,24 @@ export default class GameLogic {
       locks.push({ bottle: lockIdx, type: 'key', keyBottle: kb, keyDepth: kd });
       keyLayer = { bottle: kb, depth: kd }; // v1 仅 1 个钥匙，供隐藏槽位排除
     }
-    // 隐藏槽位：内容瓶非顶层（避开钥匙层）
+    // 遮盖瓶（PRD-玩法扩展 §2 A）：内容瓶中选，避开锁瓶/钥匙瓶；隐藏槽位候选同步排除遮盖瓶
+    // （遮盖瓶内不放 hidden 层），保证「遮盖 / 锁 / 隐藏」三者瓶级零重叠
+    const covers = [];
+    if (coverCount > 0) {
+      const coverCands = [];
+      for (let bi = 0; bi < colors; bi++) {
+        if (locks.some((l) => l.bottle === bi)) continue;
+        if (keyLayer && bi === keyLayer.bottle) continue;
+        coverCands.push(bi);
+      }
+      for (let i = 0; i < coverCount && coverCands.length > 0; i++) {
+        covers.push(coverCands.splice(rng.int(coverCands.length), 1)[0]);
+      }
+    }
+    // 隐藏槽位：内容瓶非顶层（避开钥匙层与遮盖瓶）
     const cands = [];
     for (let bi = 0; bi < colors; bi++) {
+      if (covers.includes(bi)) continue;
       for (let li = 0; li < this.capacity - 1; li++) {
         if (keyLayer && bi === keyLayer.bottle && li === keyLayer.depth) continue;
         cands.push([bi, li]);
@@ -213,7 +374,7 @@ export default class GameLogic {
       [cands[i], cands[j]] = [cands[j], cands[i]];
       hiddenSlots.push(cands[i]);
     }
-    return { locks, keyLayer, hiddenSlots };
+    return { locks, keyLayer, hiddenSlots, covers };
   }
 
   /** 机制位置放置（打散后，散打关用）：锁瓶/钥匙深度按实际瓶装量选取 */
@@ -427,8 +588,9 @@ export default class GameLogic {
    * 状态 key 规范化（自由瓶内容排序）合并排列等价状态，大幅剪枝。
    * lockInfo（可选）：
    * - condLocks：条件锁瓶（done.size < need 时冻结；锁状态由完成数推导，Q3=B）；
-   * - keyLocks：钥匙锁瓶（精确模拟钥匙层倒出：keyOut 布尔并入状态 key——
-   *   剔除模型的简化在 L30 三机制叠加时过保守（可解率≈0），改为与游戏规则一致的模拟）。
+   * - keyLocks：钥匙锁瓶（精确模拟钥匙层倒出：逐锁 keyState 位串并入状态 key——
+   *   剔除模型的简化在 L30 三机制叠加时过保守（可解率≈0），改为与游戏规则一致的模拟；
+   *   2026-10-28 修复：keyOut 单布尔 → 逐锁独立，双钥匙关不再「倒一把解全锁」）。
    */
   _solvable(bottles, nodeLimit = 60000, removedSet = null, lockInfo = null, bigInfo = null, mixCaps = null) {
     const cap = this.capacity;
@@ -446,14 +608,16 @@ export default class GameLogic {
     const done = new Set(removedSet || []); // 已收走的瓶（含搜索中新完成的），不参与倒水
     const visited = new Set();
     let nodes = 0;
-    let keyOut = false; // 钥匙层是否已倒出（v1 每关至多 1 个钥匙锁）
+    // 钥匙倒出状态（逐锁独立，PRD-100关 第5章 keyLockCount=2 起必须区分）：
+    // 旧实现为单个全局布尔（v1 每关至多 1 把钥匙的假设），双钥匙关会乐观地「倒一把解全锁」，
+    // 与活动 API 的逐锁 unlocked 不一致 → 生成会接受实际不可解局面（2026-10-28 L45 实测修复）
+    const keyState = keyLocks.map(() => false);
+    this._lastSolLen = -1; // 启发式 DFS 找到的解长（炸弹关解长约束用；未找到 = -1）
 
-    /** 瓶 i 当前是否不可用（钥匙未倒出时的钥匙锁瓶；完成数不足时的条件锁瓶） */
+    /** 瓶 i 当前是否不可用（对应钥匙未倒出时的钥匙锁瓶；完成数不足时的条件锁瓶） */
     const locked = (i) => {
-      if (!keyOut) {
-        for (const kl of keyLocks) {
-          if (kl.bottle === i) return true;
-        }
+      for (let k = 0; k < keyLocks.length; k++) {
+        if (keyLocks[k].bottle === i && !keyState[k]) return true;
       }
       for (const cl of condLocks) {
         if (cl.bottle === i && done.size < cl.need) return true;
@@ -471,13 +635,17 @@ export default class GameLogic {
       return Math.min(run, tcap - t.length);
     };
 
-    const dfs = () => {
+    const dfs = (depth = 0) => {
       if (bigIdx >= 0) {
         // 特殊关胜利条件（R4）：大瓶满且纯色 = 通关（替代「全部完成清空」）
         const big = bs[bigIdx];
-        if (big.length === bigCap && big.every((c) => c === big[0])) return true;
+        if (big.length === bigCap && big.every((c) => c === big[0])) {
+          this._lastSolLen = depth; // 解长记录（炸弹关生成约束用）
+          return true;
+        }
       } else if (bs.every((b) => b.length === 0)) {
         // 完成即清空 → 所有瓶为空 = 通关
+        this._lastSolLen = depth;
         return true;
       }
       if (nodes++ > nodeLimit) return false;
@@ -494,7 +662,11 @@ export default class GameLogic {
         // 混合关：容量编入自由瓶 key——内容相同但容量不同的瓶（cap3 vs cap5）不可互换去重
         else freeKeys.push((mixCaps ? mixCaps[i] + ':' : '') + s);
       }
-      const key = freeKeys.sort().join('|') + '#' + fixedKeys.join('|') + (keyLocks.length ? (keyOut ? '#K1' : '#K0') : '');
+      const key =
+        freeKeys.sort().join('|') +
+        '#' +
+        fixedKeys.join('|') +
+        (keyLocks.length ? '#K' + keyState.map((b) => (b ? 1 : 0)).join('') : '');
       if (visited.has(key)) return false;
       visited.add(key);
 
@@ -531,14 +703,12 @@ export default class GameLogic {
         const t = bs[m.to];
         const fromLenBefore = f.length;
         for (let i = 0; i < m.amount; i++) t.push(f.pop());
-        // 钥匙层倒出判定（与游戏 pour 逻辑一致：倒出层覆盖钥匙深度位置）
-        const keyWasOut = keyOut;
-        if (!keyOut) {
-          for (const kl of keyLocks) {
-            if (kl.keyBottle === m.from && kl.keyDepth >= fromLenBefore - m.amount) {
-              keyOut = true;
-              break;
-            }
+        // 钥匙层倒出判定（与游戏 pour 逻辑一致：倒出层覆盖钥匙深度位置；逐锁独立解锁）
+        const keyWas = keyState.join('');
+        for (let k = 0; k < keyLocks.length; k++) {
+          const kl = keyLocks[k];
+          if (!keyState[k] && kl.keyBottle === m.from && kl.keyDepth >= fromLenBefore - m.amount) {
+            keyState[k] = true;
           }
         }
         if (bigIdx < 0 && t.length === capAt(m.to)) {
@@ -555,10 +725,10 @@ export default class GameLogic {
             done.add(m.to);
           }
         }
-        if (dfs()) return true;
+        if (dfs(depth + 1)) return true;
         for (let i = 0; i < n; i++) bs[i] = snap[i];
         done.delete(m.to);
-        keyOut = keyWasOut;
+        for (let k = 0; k < keyState.length; k++) keyState[k] = keyWas[k] === '1';
       }
       return false;
     };
@@ -603,10 +773,54 @@ export default class GameLogic {
     return false;
   }
 
+  // ---------- 遮盖瓶（PRD-玩法扩展 §2 A） ----------
+
+  /**
+   * 遮盖剩余层数：由「已收集成品数」派生（每完成一瓶成品全体同步 -1，归零揭示）。
+   * completed 随 pour/undo/快照栈精确回滚 → 遮盖状态天然随局面可复算，无独立快照字段。
+   */
+  coverLeft() {
+    return Math.max(0, this.coverLayers - this.completed.length);
+  }
+
+  /** 瓶 idx 是否处于遮盖状态（未揭示遮盖瓶不可选中/倒出/倒入，与锁定瓶同级交互锁） */
+  isCovered(idx) {
+    return this.coverLayers > 0 && this.coverLeft() > 0 && this.coverBottles.includes(idx);
+  }
+
+  // ---------- 炸弹瓶（PRD-玩法扩展 §2 B） ----------
+
+  /**
+   * 失败判定（派生量，不入快照）：任一未拆除炸弹倒计时归零 → 本关失败。
+   * undo 回退倒计时后自动解除（core 只置逻辑态，弹窗 UI 由胶水层接管）。
+   */
+  isFailed() {
+    for (let k = 0; k < this.bombBottles.length; k++) {
+      if (!this.bombDefused[k] && this.bombTimers[k] <= 0) return true;
+    }
+    return false;
+  }
+
+  /** 瓶 idx 的剩余引信步数（表现层/调试协议查询）；非炸弹瓶或已拆除 → -1 */
+  bombTimerOf(idx) {
+    const k = this.bombBottles.indexOf(idx);
+    if (k < 0 || this.bombDefused[k]) return -1;
+    return this.bombTimers[k];
+  }
+
+  /** 广告复活用：所有未拆除炸弹倒计时重置为初值（拆除标记保留——拆除成果不回退） */
+  resetBombs() {
+    for (let k = 0; k < this.bombBottles.length; k++) {
+      if (!this.bombDefused[k]) this.bombTimers[k] = this.bombMoves;
+    }
+  }
+
   canPour(from, to) {
     if (from === to) return 0;
+    if (this.isFailed()) return 0; // 失败后冻结操作（除撤回/重开，PRD-玩法扩展 §2 B）
     if (this.removed.has(from) || this.removed.has(to)) return 0; // 已收走的瓶不参与
     if (this.isLocked(from) || this.isLocked(to)) return 0; // 未解锁锁瓶不可作源/目标
+    if (this.isCovered(from) || this.isCovered(to)) return 0; // 未揭示遮盖瓶不可作源/目标（PRD-玩法扩展 §2 A）
     if (this.special === 'bigBottle' && to === this.bigIndex) {
       // 瓶口颜色限制：大瓶只收限定色（R2 调整，与瓶口色环标识一致）
       const f = this.bottles[from];
@@ -638,6 +852,9 @@ export default class GameLogic {
       completedBefore: this.completed.slice(),
       removedBefore: this.removed.has(to),
       unlockedBefore: this.unlocked.slice(), // 锁状态快照（AC-06：undo 完整恢复）
+      bombsBefore: this.bombBottles.length
+        ? { t: this.bombTimers.slice(), d: this.bombDefused.slice() } // 炸弹倒计时快照（步数资源回退）
+        : null,
     };
     const color = f[f.length - 1];
     // 钥匙层倒出判定：源瓶为钥匙所在瓶，且本次倒出的层覆盖钥匙深度位置（含同色段中段整体倒出）
@@ -677,6 +894,15 @@ export default class GameLogic {
         guardBlocked = true; // 供胶水层 toast「这瓶装不下该色全部 N 层，暂不收走」
       }
     }
+    // 炸弹瓶结算（PRD-玩法扩展 §2 B）：本次倒液倒空的炸弹瓶拆除（永久，不再倒计时）；
+    // 仍未拆除的炸弹倒计时 -1，归零 → isFailed()（胶水层弹失败流程）
+    if (this.bombBottles.length) {
+      for (let k = 0; k < this.bombBottles.length; k++) {
+        const bi = this.bombBottles[k];
+        if (!this.bombDefused[k] && this.bottles[bi].length === 0) this.bombDefused[k] = true;
+        if (!this.bombDefused[k]) this.bombTimers[k]--;
+      }
+    }
     this.undoStack.push(record);
     this.moveCount++;
     return { amount, color, completedColor, guardBlocked };
@@ -690,6 +916,10 @@ export default class GameLogic {
       this.bottles = r.bottles;
       this.completed = r.completed;
       if (r.unlockedBefore) this.unlocked = r.unlockedBefore.slice();
+      if (r.bombsBefore) {
+        this.bombTimers = r.bombsBefore.t.slice();
+        this.bombDefused = r.bombsBefore.d.slice();
+      }
     } else if (r.type === 'shuffleOne') {
       this.bottles[r.idx] = r.content;
     } else if (r.type === 'addBottle') {
@@ -704,6 +934,10 @@ export default class GameLogic {
       if (r.unlockedBefore) this.unlocked = r.unlockedBefore.slice();
       if (r.removedBefore) this.removed.add(r.to);
       else this.removed.delete(r.to);
+      if (r.bombsBefore) {
+        this.bombTimers = r.bombsBefore.t.slice();
+        this.bombDefused = r.bombsBefore.d.slice();
+      }
       if (this.moveCount > 0) this.moveCount--;
     }
     return true;
@@ -725,9 +959,14 @@ export default class GameLogic {
    * @returns {boolean} 是否成功（无可行重排时失败）
    */
   shuffle() {
+    if (this.isFailed()) return false; // 失败后冻结操作（除撤回/重开）
     const frozen = new Set(); // 不参与重排的瓶（未解锁条件锁瓶整体保持原样）
     for (let k = 0; k < this.locks.length; k++) {
       if (this.locks[k].type === 'cond' && !this.unlocked[k]) frozen.add(this.locks[k].bottle);
+    }
+    // 遮盖瓶内容冻结（PRD-玩法扩展 §2 A）：瓶处于交互锁状态，与未解锁条件锁瓶同策略
+    for (const bi of this.coverBottles) {
+      if (this.isCovered(bi)) frozen.add(bi);
     }
     if (this.special === 'bigBottle') frozen.add(this.bigIndex); // 大瓶内容冻结（Q6=A：不打乱大瓶）
     const layers = [];
@@ -754,10 +993,19 @@ export default class GameLogic {
       bottles: this.bottles.map((b) => b.slice()),
       completed: this.completed.slice(),
       unlockedBefore: this.unlocked.slice(), // 锁状态快照（含 shuffle 解锁的钥匙锁）
+      bombsBefore: this.bombBottles.length
+        ? { t: this.bombTimers.slice(), d: this.bombDefused.slice() } // 炸弹状态快照（重排可能倒空炸弹瓶）
+        : null,
     };
     // 带锁验证信息：条件锁按 need 模拟（done.size 起始 = completed 数，与实际解锁状态一致）；
+    // 遮盖瓶注入伪 condLock（need = coverLayers，done 起始同 completed 数 → 与 isCovered 派生一致）；
     // 钥匙锁瓶即将被解锁，验证时视作普通空瓶（keyLocks 置空）
-    const lockInfo = { condLocks: this.locks.filter((l) => l.type === 'cond'), keyLocks: [] };
+    const lockInfo = {
+      condLocks: this.locks
+        .filter((l) => l.type === 'cond')
+        .concat(this.coverBottles.filter((b) => this.isCovered(b)).map((b) => ({ bottle: b, type: 'cond', need: this.coverLayers }))),
+      keyLocks: [],
+    };
     const nodeLimit = this.capacity >= 5 ? 200000 : 60000;
 
     for (let attempt = 0; attempt < 300; attempt++) {
@@ -793,6 +1041,13 @@ export default class GameLogic {
           : null;
       if (!this._solvable(bottles, nodeLimit, this.removed, lockInfo, bigInfo, this.mix ? this.caps : null))
         continue;
+      // 重排倒空的炸弹瓶判拆除（倒空即拆除语义一致）；timers 不因打乱变化（快照随 undo 回退）
+      if (this.bombBottles.length) {
+        for (let k = 0; k < this.bombBottles.length; k++) {
+          const bi = this.bombBottles[k];
+          if (!this.bombDefused[k] && bottles[bi].length === 0) this.bombDefused[k] = true;
+        }
+      }
       this.bottles = bottles;
       // 解锁全部钥匙锁瓶（Q7=A）
       for (let k2 = 0; k2 < this.locks.length; k2++) {
@@ -813,8 +1068,10 @@ export default class GameLogic {
   shuffleOne(idx) {
     const b = this.bottles[idx];
     if (!b || !b.length || this.removed.has(idx)) return false;
+    if (this.isFailed()) return false; // 失败后冻结操作（除撤回/重开）
     if (this.special === 'bigBottle' && idx === this.bigIndex) return false; // 大瓶不可打乱（Q6=A）
     if (this.isLocked(idx)) return false; // 锁定瓶不可打乱
+    if (this.isCovered(idx)) return false; // 遮盖瓶不可打乱（PRD-玩法扩展 §2 A）
     for (let k = 0; k < this.locks.length; k++) {
       const lk = this.locks[k];
       if (lk.type === 'key' && !this.unlocked[k] && lk.keyBottle === idx) return false; // 钥匙所在瓶
@@ -840,6 +1097,7 @@ export default class GameLogic {
    * @returns {boolean} 是否成功（达到布局上限则失败）
    */
   addBottle() {
+    if (this.isFailed()) return false; // 失败后冻结操作（除撤回/重开）
     if (this.bottles.length >= this.maxBottles) return false; // 上限走配置（levels.json maxBottles，缺省 12）
     this.bottles.push([]);
     if (this.mix) this.caps.push(this.capacity); // 新瓶 = 标准容量中转位（PRD-混合容量瓶 §4.1）
@@ -854,11 +1112,13 @@ export default class GameLogic {
    * 隐藏层仅在成为顶层时揭示，倒水规则无需特判。
    * excludeKey（可选，Q5=A）：钥匙层位置 {bottle, depth}，不与隐藏层共存（保证钥匙可见）。
    */
-  /** 在给定瓶组上随机标记隐藏层（作用于传入数组，不依赖 this.bottles） */
-  _markHidden(bottles, count, seed, excludeKey = null) {
+  /** 在给定瓶组上随机标记隐藏层（作用于传入数组，不依赖 this.bottles）。
+   *  excludeBottles（可选，PRD-玩法扩展 §2 A）：整瓶排除（遮盖瓶内不放 hidden 层） */
+  _markHidden(bottles, count, seed, excludeKey = null, excludeBottles = null) {
     const rng = new Rng(seed);
     const candidates = [];
     for (let bi = 0; bi < bottles.length; bi++) {
+      if (excludeBottles && excludeBottles.has(bi)) continue;
       for (let li = 0; li < bottles[bi].length - 1; li++) {
         if (excludeKey && bi === excludeKey.bottle && li === excludeKey.depth) continue;
         candidates.push([bi, li]);

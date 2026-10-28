@@ -125,8 +125,8 @@ check('点击开始 → 关卡选择页（第 1 关可挑战，后续锁定）',
   tap(renderer.menuPlayBtn.x + renderer.menuPlayBtn.w / 2, renderer.menuPlayBtn.y + renderer.menuPlayBtn.h / 2);
   assert.strictEqual(main.scene, 'levelSelect');
   main.tick(); // 绘制关卡选择页不抛错
-  assert.strictEqual(renderer.levelBtns.length, 30);
-  assert.strictEqual(renderer.levelCount, 30);
+  assert.strictEqual(renderer.levelBtns.length, 100);
+  assert.strictEqual(renderer.levelCount, 100);
   // 未解锁关卡点击无效
   tap(renderer.levelBtns[1].x + 5, renderer.levelBtns[1].y + 5);
   assert.strictEqual(main.scene, 'levelSelect', '未解锁关卡不应进入');
@@ -240,12 +240,13 @@ check('道具：打乱 → 选瓶模式 → 点瓶打乱、层集合不变、次
   assert.ok(idx >= 0, '应存在多色瓶');
   const p = center(renderer.bottleRect(idx));
   tap(p.x, p.y);
-  assert.strictEqual(main.props.shuffle, 0, '打乱次数应扣减');
+  assert.strictEqual(main.inv.shuffle, 1, '打乱应消耗背包 1 个（L1 首入赠 1 + 初始 1 - 用 1 = 1）');
   assert.strictEqual(main.shuffleSelecting, false, '打乱成功后应退出选瓶模式');
   assert.notStrictEqual(JSON.stringify(logic.bottles), before, '该瓶层序应变化');
   assert.strictEqual(flat(logic.bottles), flat(JSON.parse(before)), '层集合应不变');
   main.tick(); // 绘制不抛错
   const after = JSON.stringify(logic.bottles);
+  main.inv.shuffle = 0; // 模拟库存耗尽
   tap(renderer.shuffleBtn.x, renderer.shuffleBtn.y); // 次数用尽 → 广告确认浮层
   assert.strictEqual(main.adConfirm, 'shuffle', '次数用尽应弹广告确认浮层');
   main.adConfirm = null; // 清理：广告补给流程由后续测试单独覆盖
@@ -258,16 +259,18 @@ check('道具：加瓶 → 空瓶 +1、布局刷新、次数用尽后无效', ()
   assert.strictEqual(logic.bottles.length, n + 1);
   assert.strictEqual(renderer.bottleRects.length, n + 1, '布局应随瓶数刷新');
   assert.deepStrictEqual(logic.bottles[n], [], '新增瓶应为空');
+  assert.strictEqual(main.inv.addBottle, 1, '加瓶应消耗背包 1 个（L1 首入赠 1 + 初始 1 - 用 1 = 1）');
   main.tick();
+  main.inv.addBottle = 0; // 模拟库存耗尽
   tap(renderer.addBottleBtn.x, renderer.addBottleBtn.y);
   assert.strictEqual(logic.bottles.length, n + 1, '次数用尽应无效');
   main.adConfirm = null; // 清理：用尽点击会弹广告确认浮层，后续测试单独覆盖
 });
 
 check('广告补给：道具用尽 → 确认浮层 → 看广告（开发模式直接发放）', () => {
-  // 此时打乱/加瓶均已用尽（前两项测试各用掉 1 次）
-  assert.strictEqual(main.props.shuffle, 0);
-  assert.strictEqual(main.props.addBottle, 0);
+  // 此时打乱/加瓶均已用尽（前两项测试用掉并归零）
+  assert.strictEqual(main.inv.shuffle, 0);
+  assert.strictEqual(main.inv.addBottle, 0);
 
   // 点击用尽的打乱按钮 → 弹广告确认浮层（不再直接无效）
   tap(renderer.shuffleBtn.x, renderer.shuffleBtn.y);
@@ -277,13 +280,13 @@ check('广告补给：道具用尽 → 确认浮层 → 看广告（开发模式
   // 取消
   tap(renderer.adConfirmCancelBtn.x + 5, renderer.adConfirmCancelBtn.y + 5);
   assert.strictEqual(main.adConfirm, null);
-  assert.strictEqual(main.props.shuffle, 0, '取消不应补充');
+  assert.strictEqual(main.inv.shuffle, 0, '取消不应补充');
 
   // 再点 → 看广告 → 开发模式（无 adUnitId）直接发放
   tap(renderer.shuffleBtn.x, renderer.shuffleBtn.y);
   tap(renderer.adConfirmWatchBtn.x + 5, renderer.adConfirmWatchBtn.y + 5);
   assert.strictEqual(main.adConfirm, null);
-  assert.strictEqual(main.props.shuffle, 1, '看广告后应补充 1 次');
+  assert.strictEqual(main.inv.shuffle, 1, '看广告后应补充 1 次');
   assert.ok(renderer.toast, '应显示补充提示');
 });
 
@@ -296,23 +299,51 @@ check('第 4 关（含问号隐藏层）渲染不抛错', () => {
   main.selected = -1;
 });
 
-check('AC-07：道具出厂按曲线注入（L9 {1,1} / L10 {0,0}，补给流程不变）', () => {
-  main.loadLevel(8);
-  assert.deepStrictEqual(main.props, { shuffle: 1, addBottle: 1 });
+check('F-04：道具出厂废除 + 首入赠送一次性 + 撤销道具化（背包链路）', () => {
+  const invBefore = { ...main.inv };
+  main.loadLevel(8); // L9：无 grant，进关不改变背包（出厂已废除）
+  assert.deepStrictEqual(main.inv, invBefore, '出厂废除：进关不应重置背包');
   main.tick();
-  main.loadLevel(9); // L10 已是特殊关
-  assert.deepStrictEqual(main.props, { shuffle: 0, addBottle: 0 });
+
+  // L11（index 10）章首关首入发放：shuffle / addBottle 各 +1
+  main.loadLevel(10);
+  assert.strictEqual(main.inv.shuffle, invBefore.shuffle + 1, 'L11 首入应 +1 打乱');
+  assert.strictEqual(main.inv.addBottle, invBefore.addBottle + 1, 'L11 首入应 +1 加瓶');
+  main.tick();
+  main.loadLevel(10);
+  assert.strictEqual(main.inv.shuffle, invBefore.shuffle + 1, '二次进入不应重复发放');
+  assert.strictEqual(main.inv.addBottle, invBefore.addBottle + 1, '二次进入不应重复发放');
+  main.tick();
+
   // 首进特殊关弹引导浮层（浮层期间屏蔽其他输入）：先点「开始挑战」关闭
+  main.loadLevel(9); // L10 特殊关
   assert.ok(main.bigIntro, '首进特殊关应弹引导浮层');
   main.tick();
   tap(renderer.bigIntroBtn.x + renderer.bigIntroBtn.w / 2, renderer.bigIntroBtn.y + renderer.bigIntroBtn.h / 2);
   assert.ok(!main.bigIntro, '点击「开始挑战」应关闭浮层');
   main.tick();
-  // 出厂 0：直接点击打乱 → 广告确认浮层（补给流程不变）
-  tap(renderer.shuffleBtn.x, renderer.shuffleBtn.y);
-  assert.strictEqual(main.adConfirm, 'shuffle', 'L10 点击打乱应直接弹广告确认浮层');
+
+  // 撤销道具化：库存 0 且有步可撤 → 点撤回弹广告确认浮层 → 看广告 +1 可继续用
+  let src = -1;
+  let to = -1;
+  for (let f = 0; f < logic.bottles.length && src < 0; f++) {
+    for (let t = 0; t < logic.bottles.length; t++) {
+      if (f !== t && logic.canPour(f, t) > 0) {
+        src = f;
+        to = t;
+        break;
+      }
+    }
+  }
+  assert.ok(src >= 0, 'L10 开局应存在合法倒法');
+  logic.pour(src, to);
+  main.inv.undo = 0; // 模拟撤回库存耗尽
+  tap(renderer.undoBtn.x, renderer.undoBtn.y);
+  assert.strictEqual(main.adConfirm, 'undo', '撤回耗尽应弹广告确认浮层');
   main.tick(); // 浮层绘制不抛错
-  main.adConfirm = null; // 清理
+  tap(renderer.adConfirmWatchBtn.x + 5, renderer.adConfirmWatchBtn.y + 5);
+  assert.strictEqual(main.adConfirm, null);
+  assert.strictEqual(main.inv.undo, 1, '看广告后应补充 1 次撤回');
 });
 
 function assertBottlesInSafeArea() {
@@ -450,7 +481,8 @@ check('特殊关 AC-10：大瓶触摸 —— 命中覆盖全宽；普通瓶→�
   tap(ep.x, ep.y);
   assert.strictEqual(logic.moveCount, 2, '大瓶倒出应与普通瓶行为一致');
   fastForward();
-  // 连续撤回两步完整恢复
+  // 连续撤回两步完整恢复（撤销道具化：背包需备足 undo 存量）
+  main.inv.undo = Math.max(main.inv.undo, 2);
   tap(renderer.undoBtn.x, renderer.undoBtn.y);
   tap(renderer.undoBtn.x, renderer.undoBtn.y);
   assert.strictEqual(logic.moveCount, 0);
@@ -552,13 +584,13 @@ check('特殊关 AC-12：首进引导浮层 —— 首次弹出、点「开始�
   main.winPanel = false;
 });
 
-check('AC-10：关卡选择页 30 卡自适应列数 + 竖向滚动，返回键固定，重进复位', () => {
+check('AC-10：关卡选择页 100 卡自适应列数 + 竖向滚动，返回键固定，重进复位', () => {
   main.scene = 'menu';
   tap(renderer.menuPlayBtn.x + 5, renderer.menuPlayBtn.y + 5);
   assert.strictEqual(main.scene, 'levelSelect');
   main.tick();
-  assert.strictEqual(renderer.levelBtns.length, 30);
-  assert.ok(renderer.levelScrollMax > 0, '30 关内容应超出可视高度（需滚动）');
+  assert.strictEqual(renderer.levelBtns.length, 100);
+  assert.ok(renderer.levelScrollMax > 0, '100 关内容应超出可视高度（需滚动）');
   assert.strictEqual(renderer.levelScroll, 0);
 
   // 手指上拖 → 滚动偏移增加并 clamp，第 30 关卡片进入可视区
@@ -568,6 +600,13 @@ check('AC-10：关卡选择页 30 卡自适应列数 + 竖向滚动，返回键�
   main.tick(); // 滚动后绘制不抛错
   const last = renderer.levelBtns[29];
   assert.ok(last.y < renderer.H && last.y + last.h > 0, '第 30 关卡片应可滚动至可视区');
+
+  // 连续上拖到最底：第 100 关卡片应进入可视区（100 关滚动表现，F-04）
+  for (let k = 0; k < 6; k++) drag(renderer.W / 2, 600, 100);
+  main.tick();
+  const card100 = renderer.levelBtns[99];
+  assert.ok(renderer.levelScroll === renderer.levelScrollMax, '应可滚动至底部');
+  assert.ok(card100.y < renderer.H && card100.y + card100.h > 0, '第 100 关卡片应可滚动至可视区');
 
   // 下拖回顶 + 返回按钮固定（不随滚动）
   drag(renderer.W / 2, 150, 700);
@@ -581,10 +620,10 @@ check('AC-10：关卡选择页 30 卡自适应列数 + 竖向滚动，返回键�
   main.scene = 'menu'; // 恢复现场
 });
 
-check('AC-12：旧进度 cleared=8 语义 —— 第 9 关可挑战、第 10 关锁定、进度 8/30', () => {
+check('AC-12：旧进度 cleared=8 语义 —— 第 9 关可挑战、第 10 关锁定（100 关下语义不变）', () => {
   const savedCleared = main.cleared;
   main.cleared = 8;
-  assert.strictEqual(renderer.levelCount, 30);
+  assert.strictEqual(renderer.levelCount, 100);
   // 第 9 关（index 8）可挑战：直接以触摸链路进入
   main.scene = 'levelSelect';
   main.tick();
@@ -743,20 +782,20 @@ check('设置页兑换码输入：unlock_all 解锁全部关卡、无效码提�
 
   // unlock_all（大小写不敏感、容忍空格）→ 解锁全部关卡
   main.applyKey('  Unlock_All ');
-  assert.strictEqual(main.cleared, 30, 'unlock_all 应解锁全部 30 关');
-  assert.ok(renderer.toast && renderer.toast.text.includes('30'), '应提示已解锁全部关卡');
+  assert.strictEqual(main.cleared, 100, 'unlock_all 应解锁全部 100 关');
+  assert.ok(renderer.toast && renderer.toast.text.includes('100'), '应提示已解锁全部关卡');
 
-  // 解锁后第 30 关可进入（unlock_all 的验收目的）
+  // 解锁后第 100 关可进入（unlock_all 的验收目的）
   main.scene = 'levelSelect';
   main.tick();
-  main.selectLevel(29);
-  assert.strictEqual(main.scene, 'game', 'unlock_all 后第 30 关应可挑战');
-  assert.strictEqual(main.levelIndex, 29);
+  main.selectLevel(99);
+  assert.strictEqual(main.scene, 'game', 'unlock_all 后第 100 关应可挑战');
+  assert.strictEqual(main.levelIndex, 99);
   main.scene = 'settings';
 
   // 无效兑换码 → 提示且进度不变
   main.applyKey('GM');
-  assert.strictEqual(main.cleared, 30, '无效码不应改变进度');
+  assert.strictEqual(main.cleared, 100, '无效码不应改变进度');
   assert.ok(renderer.toast && renderer.toast.text === '兑换码无效');
 
   // 空输入 → 不提示不变化
@@ -1041,6 +1080,273 @@ check('P-03/S-04：levelSelect 锁定关卡卡片 —— hitButton 返回 null�
   globalThis.__te({ changedTouches: [] });
   main.cleared = 0; // 恢复现场
   main.scene = 'game';
+});
+
+check('三星评价：通关结算面板星级/最佳文案 + 关卡选择页星数显示（PRD-玩法扩展 F-05/F-07）', () => {
+  main.best = {}; // 干净起局（storage 桩为 noop，内存态即可）
+  main.loadLevel(0);
+  // DFS 走通 L1（与既有用例同源）
+  const visited = new Set();
+  const dfs = () => {
+    if (logic.isWin()) return true;
+    const key = JSON.stringify(logic.bottles) + JSON.stringify([...logic.removed]) + JSON.stringify(logic.unlocked);
+    if (visited.has(key)) return false;
+    visited.add(key);
+    for (let from = 0; from < logic.bottles.length; from++) {
+      for (let to = 0; to < logic.bottles.length; to++) {
+        if (from === to || logic.canPour(from, to) === 0) continue;
+        logic.pour(from, to);
+        if (dfs()) return true;
+        logic.undo();
+      }
+    }
+    return false;
+  };
+  assert.ok(dfs(), 'L1 应可解');
+  for (let i = 0; i < 200 && !anims.allDone(); i++) anims.update(1 / 60);
+  main.winDelay = 0.5;
+  main.tick();
+  assert.ok(main.winPanel, '应弹出胜利面板');
+  assert.ok(main.winStats && main.winStats.newRecord, '首通应标记新纪录');
+  globalThis.__fillTexts.length = 0;
+  main.tick(); // 绘制结算面板
+  const texts = globalThis.__fillTexts.join('\n');
+  assert.ok(texts.includes('★'), '结算面板应显示星级文本');
+  assert.ok(texts.includes('最佳'), '结算面板应显示最佳纪录');
+  assert.ok(texts.includes('新纪录'), '新纪录应有区分标识');
+  assert.ok(texts.includes(`本关共 ${logic.moveCount} 步`), '应显示本局步数');
+  // 关卡选择页：已通关卡片显示星数
+  main.winPanel = false;
+  main.cleared = 1;
+  main.scene = 'levelSelect';
+  globalThis.__fillTexts.length = 0;
+  main.tick();
+  const selTexts = globalThis.__fillTexts.join('\n');
+  assert.ok(selTexts.includes('★'), '关卡选择页已通关卡应显示星数');
+  // 清理现场
+  main.best = {};
+  main.cleared = 0;
+  main.scene = 'game';
+});
+
+check('遮盖瓶：渲染不抛错 + 点击拒选 + 调试协议字段 + 揭示链路（PRD-玩法扩展 F-02/F-07/F-08）', () => {
+  main.loadLevel(24); // L25：条件锁 + 遮盖首秀
+  main.tick(); // 纸袋遮罩 + 剩余层数数字绘制不抛错
+  const covered = logic.coverBottles[0];
+  assert.ok(logic.isCovered(covered), 'L25 应存在遮盖瓶');
+  // 点击遮盖瓶 → 拒选（sel=-1 + 抖动，与锁定瓶同级反馈）
+  const cp = center(renderer.bottleRect(covered));
+  tap(cp.x, cp.y);
+  assert.strictEqual(main.selected, -1, '遮盖瓶不应被选中');
+  assert.ok(anims.shakeOffset(covered) !== 0 || anims.list.some((a) => a.type === 'shake'), '应有抖动反馈');
+  // 调试协议：covers 摘要与 completedCount 写入 __dbg_state（临时捕获桩；
+  // 置空签名强制写一次，规避稳态 2s 心跳跳写）
+  const seen = {};
+  const origSet = globalThis.wx.setStorageSync;
+  globalThis.wx.setStorageSync = (k, v) => {
+    if (k === '__dbg_state') seen.state = v;
+  };
+  main._dbgSig = '';
+  main.tick();
+  globalThis.wx.setStorageSync = origSet;
+  assert.ok(seen.state, '应写入 __dbg_state');
+  assert.ok(Array.isArray(seen.state.covers), 'covers 应为数组');
+  assert.strictEqual(seen.state.covers[covered], logic.coverLeft(), '遮盖瓶摘要应 = 剩余层数');
+  assert.strictEqual(seen.state.completedCount, logic.completed.length);
+
+  // 揭示链路：L29（双遮盖、无锁、无空瓶）走通 2 瓶成品 → 全体揭示 → 同瓶可选中
+  main.loadLevel(28);
+  main.tick();
+  assert.strictEqual(logic.coverBottles.length, 2, 'L29 应有 2 个遮盖瓶');
+  const visited = new Set();
+  let nodes = 0;
+  // key 含 completed.length（遮盖揭示由成品数派生，与 tools/solve-report stateKey 同口径）
+  const key = () => logic.bottles.map((b) => b.join(',')).join('|') + '#' + logic.completed.length;
+  const dfs = () => {
+    if (logic.completed.length >= 2) return true;
+    if (nodes++ > 80000) return false;
+    const k = key();
+    if (visited.has(k)) return false;
+    visited.add(k);
+    for (let from = 0; from < logic.bottles.length; from++) {
+      for (let to = 0; to < logic.bottles.length; to++) {
+        if (from === to || logic.canPour(from, to) === 0) continue;
+        logic.pour(from, to);
+        if (dfs()) return true;
+        logic.undo();
+      }
+    }
+    return false;
+  };
+  assert.ok(dfs(), 'L29 应可走通 2 瓶成品（遮盖揭示）');
+  assert.strictEqual(logic.completed.length, 2);
+  assert.ok(logic.coverBottles.every((i) => !logic.isCovered(i)), '两遮盖瓶应全部揭示');
+  main.tick(); // 揭示后普通瓶渲染不抛错
+  const cv = logic.coverBottles[0];
+  const p2 = center(renderer.bottleRect(cv));
+  tap(p2.x, p2.y);
+  assert.strictEqual(main.selected, cv, '揭示后原遮盖瓶应可选中');
+});
+
+check('炸弹瓶：角标渲染 + 倒计时递减 + 失败弹窗链路 + 广告复活/重开 + 调试协议字段（PRD-玩法扩展 F-03/F-06/F-07/F-08）', () => {
+  main.loadLevel(22); // L23：2 炸弹瓶（8 色）
+  main.tick(); // 角标绘制不抛错
+  assert.strictEqual(logic.bombBottles.length, 2, 'L23 应有 2 个炸弹瓶');
+  assert.ok(logic.bombMoves >= 8, `引信初值应 ≥ 8（实际 ${logic.bombMoves}）`);
+  assert.ok(logic.bombBottles.every((bi) => logic.bottles[bi].length > 0), '炸弹瓶应为非空瓶');
+  const timersInit = logic.bombTimers.slice();
+
+  // UI 驱动一步倒水 → 活跃炸弹引信 -1
+  let src = -1;
+  let to = -1;
+  for (let f = 0; f < logic.bottles.length && src < 0; f++) {
+    for (let t = 0; t < logic.bottles.length; t++) {
+      if (f !== t && logic.canPour(f, t) > 0) {
+        src = f;
+        to = t;
+        break;
+      }
+    }
+  }
+  assert.ok(src >= 0, 'L23 开局应存在合法倒法');
+  tap(center(renderer.bottleRect(src)).x, center(renderer.bottleRect(src)).y);
+  tap(center(renderer.bottleRect(to)).x, center(renderer.bottleRect(to)).y);
+  assert.strictEqual(logic.moveCount, 1);
+  fastForward();
+  assert.ok(
+    logic.bombBottles.some((bi, k) => !logic.bombDefused[k] && logic.bombTimers[logic.bombBottles.indexOf(bi)] < timersInit[logic.bombBottles.indexOf(bi)]),
+    '倒水后活跃炸弹引信应递减'
+  );
+  main.tick(); // 含角标与递减后局面的绘制不抛错
+
+  // 失败链路：手工把一个引信压到 1 → 一步引爆 → 红色闪光 → 失败弹窗
+  const k0 = 0;
+  logic.bombTimers[k0] = 1;
+  let s2 = -1;
+  let t2 = -1;
+  for (let f = 0; f < logic.bottles.length && s2 < 0; f++) {
+    for (let t = 0; t < logic.bottles.length; t++) {
+      if (f !== t && logic.canPour(f, t) > 0) {
+        s2 = f;
+        t2 = t;
+        break;
+      }
+    }
+  }
+  assert.ok(s2 >= 0, '当前局面应存在合法倒法');
+  const undoBeforeFail = logic.undoStack.length;
+  logic.pour(s2, t2); // 直接驱动逻辑层（聚焦失败流程链路）
+  assert.ok(logic.isFailed(), '引信归零应判定失败');
+  fastForward();
+  for (let i = 0; i < 30 && !main.failPanel; i++) {
+    main.failDelay = 0.7; // 同毫秒 tick dt≈0，手动推进闪光计时（与 winDelay 用例同口径）
+    main.tick();
+  }
+  assert.ok(main.failPanel, '闪光结束后应弹出失败弹窗');
+  assert.ok(main.failFlashIdx >= 0, '应记录引爆瓶下标');
+  globalThis.__fillTexts.length = 0;
+  main.tick(); // 绘制失败弹窗
+  const failTexts = globalThis.__fillTexts.join('\n');
+  assert.ok(failTexts.includes('炸弹爆炸了'), '失败弹窗标题文案');
+  assert.ok(failTexts.includes('复活'), '失败弹窗应含复活按钮');
+  assert.ok(failTexts.includes('重开本关'), '失败弹窗应含重开按钮');
+
+  // 调试协议：bombs 摘要 + fail 状态 + btns 自描述
+  const seen = {};
+  const origSet = globalThis.wx.setStorageSync;
+  globalThis.wx.setStorageSync = (key, v) => {
+    if (key === '__dbg_state') seen.state = v;
+  };
+  main._dbgSig = '';
+  main.tick();
+  globalThis.wx.setStorageSync = origSet;
+  assert.ok(seen.state, '应写入 __dbg_state');
+  assert.ok(Array.isArray(seen.state.bombs), 'bombs 应为数组');
+  assert.strictEqual(seen.state.bombs[logic.bombBottles[k0]], 0, '已引爆炸弹摘要应为 0');
+  assert.strictEqual(seen.state.fail, true, '失败态应写入协议');
+  assert.ok(seen.state.btns.fail_revive && seen.state.btns.fail_restart, 'btns 表应自描述失败弹窗按钮');
+
+  // 广告复活（开发模式直接发放）：undo×3 + 引信重置，背包 undo 账本不消耗
+  const invUndoBefore = main.inv.undo;
+  const undoLenBeforeRevive = logic.undoStack.length;
+  tap(renderer.failReviveBtn.x + renderer.failReviveBtn.w / 2, renderer.failReviveBtn.y + renderer.failReviveBtn.h / 2);
+  assert.ok(!main.failPanel, '复活后失败弹窗应关闭');
+  assert.ok(!logic.isFailed(), '复活后应解除失败态');
+  assert.ok(
+    logic.bombBottles.every((bi, k) => logic.bombDefused[k] || logic.bombTimers[k] === logic.bombMoves),
+    '未拆除炸弹引信应重置为初值'
+  );
+  assert.strictEqual(logic.undoStack.length, Math.max(0, undoLenBeforeRevive - 3), '复活应回退最多 3 步');
+  assert.strictEqual(main.inv.undo, invUndoBefore, '复活回退不消耗背包 undo 账本');
+
+  // 再失败 → 重开本关
+  logic.bombTimers[k0] = 1;
+  if (!logic.isFailed()) {
+    let s3 = -1;
+    let t3 = -1;
+    for (let f = 0; f < logic.bottles.length && s3 < 0; f++) {
+      for (let t = 0; t < logic.bottles.length; t++) {
+        if (f !== t && logic.canPour(f, t) > 0) {
+          s3 = f;
+          t3 = t;
+          break;
+        }
+      }
+    }
+    if (s3 >= 0) logic.pour(s3, t3);
+  }
+  assert.ok(logic.isFailed(), '再次引爆应失败');
+  fastForward();
+  for (let i = 0; i < 30 && !main.failPanel; i++) {
+    main.failDelay = 0.7;
+    main.tick();
+  }
+  assert.ok(main.failPanel);
+  tap(renderer.failRestartBtn.x + renderer.failRestartBtn.w / 2, renderer.failRestartBtn.y + renderer.failRestartBtn.h / 2);
+  assert.ok(!main.failPanel, '重开后失败弹窗应关闭');
+  assert.strictEqual(logic.moveCount, 0, '重开后步数清零');
+  assert.deepStrictEqual(logic.bombTimers, logic.bombBottles.map(() => logic.bombMoves), '重开后引信复位');
+  assert.ok(!logic.isFailed(), '重开后不处于失败态');
+  main.tick(); // 重开后绘制不抛错
+});
+
+check('B-01：0.6s 引爆闪光窗口内撤销解除失败态 → 闪光残影复位、下次引爆正常记录、不误弹失败面板', () => {
+  main.loadLevel(22); // L23：2 炸弹瓶
+  main.tick();
+  assert.strictEqual(logic.bombBottles.length, 2, '前置：L23 应有 2 个炸弹瓶');
+  logic.bombTimers[0] = 1; // 引信压到 1 → 一步引爆
+  let s = -1;
+  let t = -1;
+  for (let f = 0; f < logic.bottles.length && s < 0; f++) {
+    for (let to = 0; to < logic.bottles.length; to++) {
+      if (f !== to && logic.canPour(f, to) > 0) {
+        s = f;
+        t = to;
+        break;
+      }
+    }
+  }
+  assert.ok(s >= 0, '当前局面应存在合法倒法');
+  logic.pour(s, t);
+  assert.ok(logic.isFailed(), '引信归零应判定失败');
+  fastForward();
+  main.tick(); // 失败检测块：记录引爆闪光（此时 0.6s 窗口内）
+  assert.ok(main.failFlashIdx >= 0, '应进入闪光态（记录引爆瓶下标）');
+  assert.ok(!main.failPanel, '0.6s 窗口内失败面板尚未弹出');
+  // 玩家在窗口内撤销 → 失败态解除
+  main.inv.undo = Math.max(main.inv.undo, 1);
+  main.undo();
+  assert.ok(!logic.isFailed(), '撤销应解除失败态');
+  main.tick(); // 推进失败检测块：闪光态应复位
+  assert.strictEqual(main.failFlashIdx, -1, '闪光残影应复位（-1）');
+  assert.strictEqual(main.failDelay, 0, '闪光计时应复位');
+  // 持续推进不再误弹失败面板；再次引爆时闪光应能正常记录新下标/新时长
+  for (let i = 0; i < 5; i++) {
+    main.failDelay = 0.7;
+    main.tick();
+  }
+  assert.ok(!main.failPanel, '失败态已解除不应弹出失败面板');
+  assert.strictEqual(main.failFlashIdx, -1, '推进后闪光态保持复位');
 });
 
 console.log(`\n结果: ${failed === 0 ? '全部通过' : failed + ' 项失败'}`);

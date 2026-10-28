@@ -286,10 +286,26 @@ if (cmd === 'tap' || cmd === 'tbtn' || cmd === 'btns') {
     const wc = webContents.getAllWebContents().find(w => w.id === Number(globalThis.__wxwc));
     if (!wc) return JSON.stringify({err: "wc lost"});
     try {
-      const host = wc.hostWebContents;
-      const el = JSON.parse(await host.executeJavaScript('JSON.stringify((() => { const w = document.querySelectorAll("webview")[0]; const r = w.getBoundingClientRect(); return {x: r.x, y: r.y, w: r.width, h: r.height}; })())', true));
+      // CDP Input 坐标换算（2026-10-28 探针实证）：运行时按「宿主窗口坐标 → 减 webview
+      // 元素原点 → ÷ zoom」反解逻辑坐标，故 cdp = webview元素原点 + 游戏坐标 × (元素尺寸/游戏尺寸)。
+      // 之前改用 game 页 canvas rect 是错的——zoom≠1 时整体错位（探针 __tap_probe 实测）；
+      // zoom=1 时两种算法等价。canvas rect 仅作 host 不可用时的兜底。
+      let el;
+      try {
+        const host = wc.hostWebContents;
+        el = JSON.parse(await host.executeJavaScript('JSON.stringify((() => { const w = document.querySelectorAll("webview")[0]; const r = w.getBoundingClientRect(); return {x: r.x, y: r.y, w: r.width, h: r.height}; })())', true));
+      } catch (e) {
+        el = JSON.parse(await wc.executeJavaScript('JSON.stringify((() => { const c = document.querySelectorAll("canvas")[0]; const r = c.getBoundingClientRect(); return {x: r.x, y: r.y, w: r.width, h: r.height}; })())', true));
+      }
       const cx = el.x + ${gameX} * (el.w / ${GAME_W}), cy = el.y + ${gameY} * (el.h / ${GAME_H});
-      if (!wc.debugger.isAttached()) wc.debugger.attach("1.3");
+      // Input 域挂起恢复（EXPERIENCE：detach→attach→bringToFront）：重编译重载后旧 CDP 会话
+      // 的 Input dispatch 会「成功返回但事件不注入」，每次 tap 前强制重建会话（2026-10-28）
+      try { wc.debugger.detach(); } catch (e) {}
+      wc.debugger.attach("1.3");
+      // Input 域在此机器上需先 bringToFront + 焦点仿真才有响应（EXPERIENCE.md 实测解法，
+      // 2026-10-27 集成验证固化为标准步骤；缺省时 dispatchTouchEvent 挂起 → INPUT_TIMEOUT）
+      try { await wc.debugger.sendCommand("Page.bringToFront"); } catch (e) {}
+      try { await wc.debugger.sendCommand("Emulation.setFocusEmulationEnabled", { enabled: true }); } catch (e) {}
       const t0 = Date.now();
       await Promise.race([
         (async () => {

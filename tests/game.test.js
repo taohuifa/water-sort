@@ -53,15 +53,16 @@ test('assets/config/levels.json 可解析且含 v3 全部必需字段（defaults
     assert.ok(key in DIFFICULTY_CURVE, `配置缺少字段 ${key}`);
   }
   assert.strictEqual(DIFFICULTY_CURVE.levelCount, LEVELS.length);
-  assert.strictEqual(DIFFICULTY_CURVE.levelCount, 30);
+  assert.strictEqual(DIFFICULTY_CURVE.levelCount, 100);
   assert.ok(Array.isArray(DIFFICULTY_CURVE.levels), 'levels 应为数组');
-  assert.strictEqual(DIFFICULTY_CURVE.levels.length, 30, '30 关每关一条记录');
+  assert.strictEqual(DIFFICULTY_CURVE.levels.length, 100, '100 关每关一条记录');
   for (const k of [
     'colors', 'empties', 'capacity', 'hiddenCount', 'condLockCount', 'condLockNeed',
-    'keyLockCount', 'noEmptyStart', 'mix', 'special', 'bigCapacity', 'props',
+    'keyLockCount', 'noEmptyStart', 'mix', 'special', 'bigCapacity',
   ]) {
     assert.ok(k in DIFFICULTY_CURVE.defaults, `defaults 模板缺少字段 ${k}`);
   }
+  assert.ok(!('props' in DIFFICULTY_CURVE.defaults), '道具出厂 props 已废除（PRD-道具背包）');
 });
 
 console.log('== 关卡配置生成 ==');
@@ -80,11 +81,11 @@ const CURVE_TABLE = [
   [8, 1, 4, 5, 0, 2, 0, false, 117], [6, 2, 4, 0, 0, 2, 0, false, null], [6, 1, 3, 4, 0, 2, 0, false, null],
   [6, 1, 4, 0, 0, 2, 0, false, 124], [8, 1, 4, 5, 0, 2, 0, false, 120], [6, 1, 5, 4, 0, 2, 0, false, 123],
   [8, 1, 4, 5, 1, 2, 0, false, null], [8, 1, 4, 5, 1, 2, 0, false, 125], [8, 1, 4, 5, 0, 2, 1, false, null],
-  [8, 1, 4, 5, 1, 2, 1, false, null], [7, 0, 4, 4, 0, 2, 0, true, null], [6, 2, 5, 0, 0, 2, 0, false, null],
+  [8, 1, 4, 5, 1, 2, 1, false, 139], [7, 0, 4, 4, 0, 2, 0, true, null], [6, 2, 5, 0, 0, 2, 0, false, null],
 ];
 
-test('AC-01：30 关参数与重排后总表逐项一致（含冻结 seed）', () => {
-  assert.strictEqual(LEVELS.length, 30);
+test('AC-01：L1~L30 参数与重排后总表逐项一致（冻结红线：铺量 100 关后零扰动）', () => {
+  assert.strictEqual(LEVELS.length, 100);
   for (let i = 0; i < 30; i++) {
     const lv = LEVELS[i];
     const [colors, empties, capacity, hidden, condN, condNeed, keyN, noEmpty, seed] = CURVE_TABLE[i];
@@ -99,6 +100,86 @@ test('AC-01：30 关参数与重排后总表逐项一致（含冻结 seed）', (
     assert.strictEqual(lv.noEmptyStart, noEmpty, `L${i + 1} noEmptyStart`);
     const expectSeed = seed ?? DIFFICULTY_CURVE.seedBase + lv.level;
     assert.strictEqual(lv.seed, expectSeed, `L${i + 1} seed（冻结或缺省 seedBase+关卡号）`);
+  }
+});
+
+// L31~L100 章节配置总表（AC-01，PRD-100关扩充 §3，见 docs/design/关卡扩充-100关-实现.md §3）：
+// [colors, empties, capacity, hidden, condN, condNeed, keyN, noEmpty, coverN, bombN, bossBig(null=普通关), mix]
+// seed 一律 = seedBase + 关卡号（全量固化显式写入，防重排）；Boss 关（40/50/60/70/80/90/100）为 bigBottle。
+const CHAPTER_TABLE = [
+  // 第4章 31~40：8 色深化（empties 1 常态、cap3/cap5 轮换、隐藏 5）
+  [8, 1, 4, 5, 0, 2, 0, false, 0, 0, null, false], [8, 1, 4, 5, 0, 2, 0, false, 1, 0, null, false],
+  [8, 1, 3, 5, 0, 2, 0, false, 0, 0, null, false], [8, 1, 3, 5, 0, 2, 0, false, 1, 0, null, false],
+  [8, 1, 4, 5, 1, 2, 0, false, 0, 0, null, false], [8, 1, 4, 5, 0, 2, 1, false, 0, 0, null, false],
+  [8, 1, 5, 5, 0, 2, 0, false, 0, 0, null, false], [8, 1, 5, 5, 0, 2, 0, false, 1, 0, null, false],
+  [8, 1, 5, 5, 1, 2, 0, false, 0, 0, null, false], [7, 2, 5, 0, 0, 2, 0, false, 0, 0, 9, false],
+  // 第5章 41~50：锁之章（cond2 need2→3 / key2 爬坡）
+  [8, 1, 4, 5, 2, 2, 0, false, 0, 0, null, false], [8, 1, 4, 5, 2, 2, 0, false, 1, 0, null, false],
+  [8, 1, 4, 5, 2, 3, 0, false, 0, 0, null, false], [8, 1, 4, 5, 2, 3, 0, false, 1, 0, null, false],
+  [8, 1, 4, 5, 0, 2, 2, false, 0, 0, null, false], [8, 1, 4, 5, 0, 2, 2, false, 1, 0, null, false],
+  [8, 1, 4, 5, 1, 3, 1, false, 1, 0, null, false], [8, 1, 4, 5, 2, 3, 1, false, 0, 0, null, false],
+  [8, 1, 4, 5, 1, 3, 2, false, 0, 0, null, false], [7, 2, 5, 0, 0, 2, 0, false, 0, 0, 10, false],
+  // 第6章 51~60：无空瓶章（隔关出现、与锁/隐藏组合）
+  [8, 0, 4, 5, 0, 2, 0, true, 0, 0, null, false], [8, 1, 4, 5, 1, 2, 0, false, 0, 0, null, false],
+  [8, 0, 4, 5, 1, 2, 0, true, 0, 0, null, false], [8, 0, 4, 5, 0, 2, 1, true, 0, 0, null, false],
+  [8, 1, 4, 5, 0, 2, 1, false, 1, 0, null, false], [8, 0, 4, 5, 2, 2, 0, true, 0, 0, null, false],
+  [8, 0, 4, 4, 0, 2, 0, true, 2, 0, null, false], [8, 0, 4, 5, 1, 3, 1, true, 0, 0, null, false],
+  [8, 0, 4, 4, 1, 3, 1, true, 1, 0, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 9, false],
+  // 第7章 61~70：容量章（cap5 全章 + 8 色 + 隐藏 5 + empties 1）
+  [8, 1, 5, 5, 0, 2, 0, false, 0, 0, null, false], [8, 1, 5, 5, 0, 2, 0, false, 1, 0, null, false],
+  [8, 1, 5, 5, 1, 2, 0, false, 0, 0, null, false], [8, 1, 5, 5, 0, 2, 1, false, 0, 0, null, false],
+  [8, 1, 5, 5, 1, 2, 0, false, 1, 0, null, false], [8, 1, 5, 5, 0, 2, 1, false, 1, 0, null, false],
+  [8, 1, 5, 5, 0, 2, 0, false, 0, 1, null, false], [8, 1, 5, 5, 1, 2, 0, false, 0, 1, null, false],
+  [8, 1, 5, 5, 0, 2, 1, false, 0, 1, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 10, false],
+  // 第8章 71~80：组合章（双锁 + 无空瓶 + cover 轮换）
+  [8, 0, 4, 5, 1, 2, 1, true, 0, 0, null, false], [8, 1, 4, 5, 2, 2, 0, false, 1, 0, null, false],
+  [8, 0, 4, 5, 2, 2, 0, true, 0, 0, null, false], [8, 1, 4, 5, 0, 2, 2, false, 1, 0, null, false],
+  [8, 0, 4, 4, 1, 3, 1, true, 0, 0, null, false], [8, 1, 4, 5, 1, 3, 1, false, 1, 0, null, false],
+  [8, 0, 4, 5, 0, 2, 2, true, 1, 0, null, false], [8, 1, 4, 4, 2, 3, 0, false, 1, 0, null, false],
+  [8, 0, 4, 4, 1, 3, 1, true, 1, 0, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 11, false],
+  // 第9章 81~90：极限章（三重叠加 + cap5/mix 轮换）
+  [8, 1, 5, 5, 1, 2, 1, false, 0, 0, null, false], [8, 1, 4, 5, 2, 2, 0, false, 1, 0, null, false],
+  [8, 1, 5, 5, 1, 3, 1, false, 1, 0, null, false], [6, 2, 4, 0, 0, 2, 0, false, 0, 0, null, true],
+  [8, 1, 5, 4, 1, 3, 0, false, 0, 1, null, false], [8, 1, 5, 5, 2, 3, 0, false, 0, 0, null, false],
+  [8, 1, 4, 4, 1, 3, 1, false, 1, 0, null, false], [8, 1, 5, 5, 1, 3, 2, false, 0, 0, null, false],
+  [8, 1, 5, 4, 1, 3, 1, false, 0, 1, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 12, false],
+  // 第10章 91~100：终章（高难配方 + 炸弹引入）
+  [8, 1, 5, 4, 1, 3, 1, false, 0, 1, null, false], [8, 1, 5, 5, 0, 2, 0, false, 0, 2, null, false],
+  [8, 1, 5, 4, 2, 3, 0, false, 0, 1, null, false], [8, 1, 5, 5, 1, 3, 1, false, 1, 0, null, false],
+  [8, 1, 5, 4, 1, 3, 0, false, 0, 2, null, false], [8, 1, 5, 4, 1, 3, 1, false, 1, 1, null, false],
+  [8, 1, 5, 5, 0, 2, 2, false, 0, 1, null, false], [8, 1, 5, 3, 1, 3, 1, false, 0, 2, null, false],
+  [8, 1, 5, 3, 1, 3, 1, false, 1, 2, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 8, false],
+];
+
+test('AC-01：L31~L100 章节配置总表逐项一致（全机制铺量，seed 全量固化）', () => {
+  assert.strictEqual(LEVELS.length, 100);
+  for (let i = 30; i < 100; i++) {
+    const lv = LEVELS[i];
+    const [colors, empties, capacity, hidden, condN, condNeed, keyN, noEmpty, coverN, bombN, bossBig, mix] =
+      CHAPTER_TABLE[i - 30];
+    const no = i + 1;
+    assert.strictEqual(lv.level, no);
+    // seed 全量显式固化（记录带 "seed" 字段）；个别关单独重摇后可偏离缺省公式，但必须显式写死
+    assert.strictEqual(typeof DIFFICULTY_CURVE.levels[i].seed, 'number', `L${no} seed 应显式固化在配置中`);
+    assert.strictEqual(lv.colors, colors, `L${no} colors`);
+    assert.strictEqual(lv.empties, empties, `L${no} empties`);
+    assert.strictEqual(lv.capacity, capacity, `L${no} capacity`);
+    assert.strictEqual(lv.hiddenCount, hidden, `L${no} hiddenCount`);
+    assert.strictEqual(lv.condLockCount, condN, `L${no} condLockCount`);
+    assert.strictEqual(lv.condLockNeed, condNeed, `L${no} condLockNeed`);
+    assert.strictEqual(lv.keyLockCount, keyN, `L${no} keyLockCount`);
+    assert.strictEqual(lv.noEmptyStart, noEmpty, `L${no} noEmptyStart`);
+    assert.strictEqual(lv.coverCount, coverN, `L${no} coverCount`);
+    assert.strictEqual(lv.bombCount, bombN, `L${no} bombCount`);
+    if (bossBig != null) {
+      assert.strictEqual(lv.special, 'bigBottle', `L${no} 应为 bigBottle Boss`);
+      assert.strictEqual(lv.bigCapacity, bossBig, `L${no} bigCapacity`);
+      assert.strictEqual(lv.hiddenCount, 0, `L${no} Boss 不叠加隐藏`);
+      assert.strictEqual(lv.condLockCount + lv.keyLockCount, 0, `L${no} Boss 不叠加锁`);
+    } else {
+      assert.ok(!lv.special, `L${no} 普通关不应带 special`);
+      assert.strictEqual(lv.mix, mix, `L${no} mix`);
+    }
   }
 });
 
@@ -135,8 +216,11 @@ test('难度曲线颜色数合法（机制首秀关允许降档缓冲，非严�
   }
   assert.ok(LEVELS.some((l) => l.colors === 8), '应存在 8 色关');
   const matcha = LEVELS.filter((l) => l.colors === 8).map((l) => l.level);
-  // 重排后 8 色关位于第 15/16/18/19/23/25/26/27/28 关（原 L14~L19/L24/L25/L27/L28 记录）
-  assert.deepStrictEqual(matcha, [15, 16, 18, 19, 23, 25, 26, 27, 28]);
+  // L1~L30 为重排后冻结位次；L31~L100 按 100 关章节表：仅 Boss L40/L50（7 色）与混合缓冲 L84（6 色）非 8 色
+  const expected8 = [...new Set([...Array(100).keys()].map((i) => i + 1))].filter(
+    (n) => n <= 30 ? [15, 16, 18, 19, 23, 25, 26, 27, 28].includes(n) : ![40, 50, 84].includes(n)
+  );
+  assert.deepStrictEqual(matcha, expected8);
 });
 
 console.log('== 关卡生成 ==');
@@ -503,8 +587,8 @@ test('关卡配置：隐藏层数量随难度爬坡（第 4 关起；特殊关/�
   assert.strictEqual(LEVELS[14].hiddenCount, 5); // 第 15 关 8 色首秀（原 L15）
   assert.strictEqual(LEVELS[9].hiddenCount, 0); // 第 10 关特殊关强制清零（S-01）
   assert.strictEqual(LEVELS[19].hiddenCount, 0); // 第 20 关特殊关强制清零
-  for (const i of [10, 13, 16, 21]) {
-    // 混合关槽位 11/14/17/22：锁与隐藏强制清零（v1 不叠加）
+  for (const i of [10, 13, 16, 21, 83]) {
+    // 混合关槽位 11/14/17/22/84：锁与隐藏强制清零（v1 不叠加）
     assert.strictEqual(LEVELS[i].hiddenCount, 0, `第 ${i + 1} 关混合关 hiddenCount 应为 0`);
     assert.strictEqual(LEVELS[i].mix, true, `第 ${i + 1} 关应为混合关`);
   }
@@ -715,12 +799,31 @@ test('L27 钥匙锁生成：锁瓶含内容（Q4=B）、钥匙层非顶层/非�
 
 console.log('== 道具出厂曲线与锁瓶道具适配（R1 / AC-07、D-06） ==');
 
-test('AC-07：L9 道具出厂 {1,1}，L10 起出厂 {0,0}（仅广告补给）', () => {
-  assert.deepStrictEqual(LEVELS[8].props, { shuffle: 1, addBottle: 1 });
-  assert.deepStrictEqual(LEVELS[9].props, { shuffle: 0, addBottle: 0 });
-  for (let i = 10; i < LEVELS.length; i++) {
-    assert.deepStrictEqual(LEVELS[i].props, { shuffle: 0, addBottle: 0 }, `L${i + 1} 道具应为 {0,0}`);
+test('F-04：首入赠送 grant 解析 —— 章首关=shuffle/addBottle 各 1、每 5 关=undo 2，其余关无 grant；旧 props 字段兼容不炸', () => {
+  // 100 关按 PRD 节奏：章首关（1/11/21/31/41/51/61/71/81/91）+ 每 5 关（35/45/…/95）
+  const chapterHeads = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90];
+  const every5 = [34, 44, 54, 64, 74, 84, 94];
+  for (const idx of chapterHeads) {
+    assert.deepStrictEqual(LEVELS[idx].grant, { shuffle: 1, addBottle: 1 }, `L${idx + 1} 应配章首关赠送`);
   }
+  for (const idx of every5) {
+    assert.deepStrictEqual(LEVELS[idx].grant, { undo: 2 }, `L${idx + 1} 应配每 5 关赠送`);
+  }
+  for (let i = 0; i < LEVELS.length; i++) {
+    if (![...chapterHeads, ...every5].includes(i)) {
+      assert.ok(!LEVELS[i].grant, `L${i + 1} 不应配 grant`);
+    }
+    assert.ok(!('props' in LEVELS[i]), `L${i + 1} 不应再解析出厂 props`);
+  }
+  // 旧存档/旧配置兼容：带 props 字段的配置不再报错、也不透传
+  const legacy = buildLevelsFromConfig({
+    levelCount: 1,
+    seedBase: 1,
+    defaults: { colors: 4, empties: 2, props: { shuffle: 1, addBottle: 1 } },
+    levels: [{ level: 1, props: { shuffle: 0, addBottle: 0 } }],
+  });
+  assert.ok(!('props' in legacy[0]), '旧 props 字段应被忽略');
+  assert.strictEqual(legacy[0].grant, null, '未配 grant 时应为 null');
 });
 
 /**
@@ -767,6 +870,7 @@ test('shuffleOne：锁定瓶与钥匙所在瓶（未解锁）拒绝打乱', () =
       b.length > 1 &&
       new Set(b.map((c) => (c >= 0 ? c : -c - 1))).size > 1 &&
       !logic.isLocked(i) &&
+      !logic.isCovered(i) && // 遮盖瓶与锁定瓶同级交互锁，不属于「普通瓶」（L28 含遮盖 1）
       !logic.locks.some((l) => l.type === 'key' && l.keyBottle === i && !logic.unlocked[logic.locks.indexOf(l)])
   );
   if (normal >= 0) assert.ok(logic.shuffleOne(normal), '普通多色瓶可打乱');
@@ -800,13 +904,20 @@ function findMove(logic) {
 
 console.log('== 特殊关卡：大瓶收集（PRD-特殊关卡-大瓶收集.md / AC-01~AC-08） ==');
 
-const SPECIAL_IDX = [9, 19, 29]; // L10 / L20 / L30 原位替换为特殊关（拍板 1=A/2=D）
+const SPECIAL_IDX = [9, 19, 29, 39, 49, 59, 69, 79, 89, 99]; // 每章末 Boss：L10/20/30（原 30 关）+ L40~L100（铺量章节 Boss）
 
-test('AC-01：L10/L20/L30 特殊关 schema —— special/bigCapacity 透传，叠加机制强制清零，其余 27 关不带 special', () => {
+test('AC-01：10 个 Boss 特殊关 schema —— special/bigCapacity 透传，叠加机制强制清零，其余 90 关不带 special', () => {
   const expect = [
     { colors: 4, capacity: 4, bigCapacity: 8, empties: 2 },
     { colors: 6, capacity: 4, bigCapacity: 6, empties: 2 }, // 重排时单独加压：colors 5→6
     { colors: 6, capacity: 5, bigCapacity: 8, empties: 2 },
+    { colors: 7, capacity: 5, bigCapacity: 9, empties: 2 }, // Boss④~⑩（PRD-100关扩充 §3 递进）
+    { colors: 7, capacity: 5, bigCapacity: 10, empties: 2 },
+    { colors: 8, capacity: 5, bigCapacity: 9, empties: 2 },
+    { colors: 8, capacity: 5, bigCapacity: 10, empties: 2 },
+    { colors: 8, capacity: 5, bigCapacity: 11, empties: 2 },
+    { colors: 8, capacity: 5, bigCapacity: 12, empties: 2 },
+    { colors: 8, capacity: 5, bigCapacity: 8, empties: 2 }, // 终极：cap5 普通瓶 + 8 层大瓶 + 8 色（PRD 拍板）
   ];
   for (let s = 0; s < SPECIAL_IDX.length; s++) {
     const lv = LEVELS[SPECIAL_IDX[s]];
@@ -887,7 +998,8 @@ test('S-02：大瓶发牌结构 —— 大瓶末位开局含 1 层限定色、�
       !logic.bottles.some((b, i) => i !== logic.bigIndex && logic._isFullMono(b)),
       '开局不得有满纯色普通瓶'
     );
-    const content = Math.ceil((cfg.bigCapacity + (cfg.colors - 1) * cfg.capacity) / cfg.capacity);
+    // 内容瓶数按发牌池计算：大瓶预置 1 层限定色不入池（_randomDealBig 池 = bigCapacity-1 + 干扰色×capacity）
+    const content = Math.ceil((cfg.bigCapacity - 1 + (cfg.colors - 1) * cfg.capacity) / cfg.capacity);
     assert.strictEqual(logic.bottles.length, content + cfg.empties + 1, '瓶数 = 内容瓶 + 空瓶 + 大瓶');
   }
 });
@@ -1091,7 +1203,7 @@ test('R3 交叉：hasAnyMove 含大瓶 —— 大瓶非空可作源；仅剩大�
 
 console.log('== 混合容量瓶（PRD-混合容量瓶 / AC-1~AC-6） ==');
 
-const MIX_IDX = [10, 13, 16, 21]; // 第 11/14/17/22 关（重排后混合关，原 L26/L17/L13/L23 记录）
+const MIX_IDX = [10, 13, 16, 21, 83]; // 第 11/14/17/22 关（重排后混合关）+ L84（第9章混合缓冲，机制强制清零）
 
 /** 构造固定混合局面（注入 caps，与 loadFixed 同思路） */
 function loadMixFixed(bottles, caps, { colors = 0, capacity = 4 } = {}) {
@@ -1104,10 +1216,10 @@ function loadMixFixed(bottles, caps, { colors = 0, capacity = 4 } = {}) {
   return logic;
 }
 
-test('MX-1/AC-1：混合关 schema —— mix 透传、锁/隐藏/无空瓶强制 0、special 剥离；其余 26 关不带 mix', () => {
+test('MX-1/AC-1：混合关 schema —— mix 透传、锁/隐藏/无空瓶强制 0、special 剥离；其余 95 关不带 mix', () => {
   assert.deepStrictEqual(
     LEVELS.filter((l) => l.mix).map((l) => l.level),
-    [11, 14, 17, 22]
+    [11, 14, 17, 22, 84]
   );
   for (const idx of MIX_IDX) {
     const lv = LEVELS[idx];
@@ -1255,11 +1367,34 @@ function solveVerify(cfg, nodeLimit = 150000) {
 
   // 状态 key：无锁关按「自由瓶内容排序 + 大瓶/收走瓶固定身份」规范化
   // （与内部 _solvable 同源：排列等价态合并，防特殊关深搜树过大导致超时/爆栈）；
-  // 带锁关保持原序（锁瓶身份固定，不可合并）。
+  // 带锁/带遮盖/带炸弹关保持原序（锁瓶/遮盖瓶/炸弹瓶身份固定，不可合并），且 removed/unlocked/
+  // completed/炸弹剩余步数必须入 key——锁与遮盖状态由这些字段派生（遮盖 = coverLayers - completed.length），
+  // 同一瓶面不同解锁/成品/引信进度可达性不同，漏掉会误剪枝（PRD-玩法扩展 §7）。
   const hasLocks = logic.locks.length > 0;
+  const hasCovers = logic.coverBottles.length > 0;
+  const hasBombs = logic.bombBottles.length > 0;
   const bigIdx = logic.bigIndex;
   const key = () => {
-    if (hasLocks) return logic.bottles.map((b) => b.join(',')).join('|');
+    if (hasLocks || hasCovers || hasBombs) {
+      const fixed = [];
+      for (let i = 0; i < logic.bottles.length; i++) {
+        const s = logic.bottles[i].join(',');
+        if (i === bigIdx) fixed.push('B' + s);
+        else if (logic.removed.has(i)) fixed.push('D');
+        else if (logic.isCovered(i)) fixed.push('C' + s);
+        else if (hasBombs && logic.bombTimerOf(i) >= 0) fixed.push('M' + logic.bombTimerOf(i) + ':' + s);
+        else fixed.push('F' + s);
+      }
+      return (
+        fixed.join('|') +
+        '#' +
+        [...logic.removed].join(',') +
+        '|' +
+        logic.unlocked.map(Number).join('') +
+        '|' +
+        logic.completed.length
+      );
+    }
     const free = [];
     const fixed = [];
     for (let i = 0; i < logic.bottles.length; i++) {
@@ -1330,6 +1465,16 @@ for (let idx = 0; idx < LEVELS.length; idx++) {
     console.log(`      通关步数 ${moves}，搜索 ${states} 态`);
   });
 }
+
+test('钥匙锁 ×2（L45/L46/L49）：活动 API 可实际走通（双钥匙逐锁解锁，回归守护）', () => {
+  // 回归背景：_solvable 曾用单个全局 keyOut 布尔模拟钥匙（「倒一把解全锁」），
+  // 与活动 API 逐锁 unlocked 不一致 → keyLockCount=2 关会生成实际不可解牌面（2026-10-28 修复）
+  for (const idx of [44, 45, 48]) {
+    const { solved, limitHit } = solveVerify(LEVELS[idx]);
+    assert.ok(!limitHit, `L${idx + 1} 活动 API DFS 不应超限`);
+    assert.ok(solved, `L${idx + 1} 活动 API 应实际可走通`);
+  }
+});
 
 console.log('== 混合关回收守卫（PRD-按钮反馈与混合关回收守卫 / AC-01~AC-04） ==');
 
