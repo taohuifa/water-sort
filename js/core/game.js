@@ -715,6 +715,7 @@ export default class GameLogic {
       last = { bottles, caps };
       if (bottles.some((b, i) => this._isFullMono(b, caps[i]))) continue;
       if (this._solvable(bottles, nodeLimit, null, null, null, caps)) {
+        if (this._gen) this._gen.lastDealSeed = seed + attempt * 997; // 命中 dealSeed 直读（seed 规范化/工具用，与主生成器同模式）
         this.lastGenSolvable = true;
         return { bottles, caps, locks: [], keyLayer: null };
       }

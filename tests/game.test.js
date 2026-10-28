@@ -111,24 +111,24 @@ test('AC-01：L1~L30 参数与重排后总表逐项一致（冻结红线：铺�
 const CHAPTER_TABLE = [
   // 第4章 31~40：8 色深化（empties 1 常态、cap3/cap5 轮换、隐藏 5）
   [8, 1, 4, 5, 0, 2, 0, false, 0, 0, null, false], [8, 1, 4, 5, 0, 2, 0, false, 1, 0, null, false],
-  [8, 1, 3, 5, 0, 2, 0, false, 0, 0, null, false], [8, 1, 3, 5, 0, 2, 0, false, 1, 0, null, false],
+  [8, 1, 3, 0, 0, 2, 0, false, 0, 0, null, true], [8, 1, 3, 5, 0, 2, 0, false, 1, 0, null, false],
   [8, 1, 4, 5, 1, 2, 0, false, 0, 0, null, false], [8, 1, 4, 5, 0, 2, 1, false, 0, 0, null, false],
   [8, 1, 5, 5, 0, 2, 0, false, 0, 1, null, false], [8, 1, 5, 5, 0, 2, 0, false, 1, 0, null, false],
   [8, 1, 5, 5, 1, 2, 0, false, 0, 1, null, false], [7, 2, 5, 0, 0, 2, 0, false, 0, 0, 9, false],
   // 第5章 41~50：锁之章（cond2 need2→3 / key2 爬坡）
-  [8, 1, 4, 5, 2, 2, 0, false, 0, 0, null, false], [8, 1, 4, 5, 2, 2, 0, false, 1, 0, null, false],
+  [8, 1, 4, 5, 2, 2, 0, false, 0, 0, null, false], [8, 1, 4, 0, 0, 2, 0, false, 0, 0, null, true],
   [8, 1, 4, 5, 2, 3, 0, false, 0, 0, null, false], [8, 1, 4, 5, 2, 3, 0, false, 1, 0, null, false],
   [8, 1, 4, 5, 0, 2, 2, false, 0, 1, null, false], [8, 1, 4, 5, 0, 2, 2, false, 1, 0, null, false],
   [8, 1, 4, 5, 1, 3, 1, false, 1, 0, null, false], [8, 1, 4, 5, 2, 3, 1, false, 0, 0, null, false],
   [8, 1, 4, 5, 1, 3, 2, false, 0, 0, null, false], [7, 2, 5, 0, 0, 2, 0, false, 0, 0, 10, false],
   // 第6章 51~60：无空瓶章（隔关出现、与锁/隐藏组合）
   [8, 0, 4, 5, 0, 2, 0, true, 0, 0, null, false], [8, 1, 4, 5, 1, 2, 0, false, 0, 0, null, false],
-  [8, 0, 4, 5, 1, 2, 0, true, 0, 0, null, false], [8, 0, 4, 5, 0, 2, 1, true, 0, 1, null, false],
+  [8, 1, 4, 0, 0, 2, 0, false, 0, 0, null, true], [8, 0, 4, 5, 0, 2, 1, true, 0, 1, null, false],
   [8, 1, 4, 5, 0, 2, 1, false, 1, 0, null, false], [8, 0, 4, 5, 2, 2, 0, true, 0, 0, null, false],
   [8, 0, 4, 4, 0, 2, 0, true, 2, 0, null, false], [8, 0, 4, 5, 1, 3, 1, true, 0, 0, null, false],
   [8, 0, 4, 4, 1, 3, 1, true, 1, 0, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 10, false],
   // 第7章 61~70：容量章（cap5 全章 + 8 色 + 隐藏 5 + empties 1）
-  [8, 1, 5, 5, 0, 2, 0, false, 0, 0, null, false], [8, 1, 5, 5, 0, 2, 0, false, 1, 0, null, false],
+  [8, 1, 5, 0, 0, 2, 0, false, 0, 0, null, true], [8, 1, 5, 5, 0, 2, 0, false, 1, 0, null, false],
   [8, 1, 5, 5, 1, 2, 0, false, 0, 0, null, false], [8, 1, 5, 5, 0, 2, 1, false, 0, 0, null, false],
   [8, 1, 5, 5, 1, 2, 0, false, 1, 0, null, false], [8, 1, 5, 5, 0, 2, 1, false, 1, 0, null, false],
   [8, 1, 5, 5, 0, 2, 0, false, 0, 1, null, false], [8, 1, 5, 5, 1, 2, 0, false, 0, 1, null, false],
@@ -146,9 +146,9 @@ const CHAPTER_TABLE = [
   [8, 1, 4, 4, 1, 3, 1, false, 1, 0, null, false], [8, 1, 5, 5, 1, 3, 2, false, 0, 0, null, false],
   [8, 1, 5, 4, 1, 3, 1, false, 0, 1, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 12, false],
   // 第10章 91~100：终章（高难配方 + 炸弹引入）
-  [8, 1, 5, 4, 1, 3, 1, false, 0, 1, null, false], [8, 1, 5, 5, 0, 2, 0, false, 0, 2, null, false],
+  [8, 1, 5, 4, 1, 3, 1, false, 0, 1, null, false], [8, 1, 5, 0, 0, 2, 0, false, 0, 0, null, true],
   [8, 1, 5, 4, 2, 3, 0, false, 0, 1, null, false], [8, 1, 5, 5, 1, 3, 1, false, 1, 0, null, false],
-  [8, 1, 5, 4, 1, 3, 0, false, 0, 2, null, false], [8, 1, 5, 4, 1, 3, 1, false, 0, 1, null, false],
+  [8, 1, 5, 0, 0, 2, 0, false, 0, 0, null, true], [8, 1, 5, 4, 1, 3, 1, false, 0, 1, null, false],
   [8, 1, 5, 5, 0, 2, 1, false, 0, 1, null, false], [8, 1, 5, 3, 1, 3, 1, false, 0, 2, null, false],
   [8, 1, 5, 3, 1, 3, 1, false, 0, 2, null, false], [8, 2, 5, 0, 0, 2, 0, false, 0, 0, 8, false],
 ];
@@ -249,8 +249,8 @@ test('每关：瓶数 = 颜色数 + 空瓶数（无空瓶开局 = 颜色数+1）
     }
     for (let c = 0; c < cfg.colors; c++) {
       if (cfg.mix) {
-        // 混合关 v2：每色总量随机 3~5（= 收纳瓶自身容量），不再恒 = capacity
-        assert.ok(count[c] >= 3 && count[c] <= 5, `色 ${c} 总量 ${count[c]} 应在 3~5`);
+        // 混合关 v2：每色总量随机（= 收纳瓶自身容量，容量池 = 基准容量 ±1），不再恒 = capacity
+        assert.ok(count[c] >= cfg.capacity - 1 && count[c] <= cfg.capacity + 1, `色 ${c} 总量 ${count[c]} 应在 ${cfg.capacity - 1}~${cfg.capacity + 1}`);
       } else {
         assert.strictEqual(count[c], cfg.capacity, `颜色 ${c} 总量应为 ${cfg.capacity}，实际 ${count[c]}`);
       }
@@ -618,8 +618,8 @@ test('关卡配置：隐藏层数量随难度爬坡（第 4 关起；特殊关/�
   assert.strictEqual(LEVELS[14].hiddenCount, 5); // 第 15 关 8 色首秀（原 L15）
   assert.strictEqual(LEVELS[9].hiddenCount, 0); // 第 10 关特殊关强制清零（S-01）
   assert.strictEqual(LEVELS[19].hiddenCount, 0); // 第 20 关特殊关强制清零
-  for (const i of [10, 13, 16, 21, 83]) {
-    // 混合关槽位 11/14/17/22/84：锁与隐藏强制清零（v1 不叠加）
+  for (const i of [10, 13, 16, 21, 32, 41, 52, 60, 83, 91, 94]) {
+    // 混合关槽位 11/14/17/22/33/42/53/61/84/92/95：锁与隐藏强制清零（v1 不叠加）
     assert.strictEqual(LEVELS[i].hiddenCount, 0, `第 ${i + 1} 关混合关 hiddenCount 应为 0`);
     assert.strictEqual(LEVELS[i].mix, true, `第 ${i + 1} 关应为混合关`);
   }
@@ -1238,7 +1238,7 @@ test('R3 交叉：hasAnyMove 含大瓶 —— 大瓶只进不出（仅作目标�
 
 console.log('== 混合容量瓶（PRD-混合容量瓶 / AC-1~AC-6） ==');
 
-const MIX_IDX = [10, 13, 16, 21, 83]; // 第 11/14/17/22 关（重排后混合关）+ L84（第9章混合缓冲，机制强制清零）
+const MIX_IDX = [10, 13, 16, 21, 32, 41, 52, 60, 83, 91, 94]; // L11/14/17/22（重排混合关）+ L33/42/53/61/92/95（A 方案扩容）+ L84（第9章混合缓冲）
 
 /** 构造固定混合局面（注入 caps，与 loadFixed 同思路） */
 function loadMixFixed(bottles, caps, { colors = 0, capacity = 4 } = {}) {
@@ -1254,7 +1254,7 @@ function loadMixFixed(bottles, caps, { colors = 0, capacity = 4 } = {}) {
 test('MX-1/AC-1：混合关 schema —— mix 透传、锁/隐藏/无空瓶强制 0、special 剥离；其余 95 关不带 mix', () => {
   assert.deepStrictEqual(
     LEVELS.filter((l) => l.mix).map((l) => l.level),
-    [11, 14, 17, 22, 84]
+    [11, 14, 17, 22, 33, 42, 53, 61, 84, 92, 95]
   );
   for (const idx of MIX_IDX) {
     const lv = LEVELS[idx];
@@ -1263,7 +1263,7 @@ test('MX-1/AC-1：混合关 schema —— mix 透传、锁/隐藏/无空瓶强�
     assert.strictEqual(lv.keyLockCount, 0, `L${lv.level} 混合关无钥匙锁`);
     assert.strictEqual(lv.hiddenCount, 0, `L${lv.level} 混合关无隐藏层`);
     assert.strictEqual(lv.noEmptyStart, false, `L${lv.level} 混合关非无空瓶开局`);
-    assert.strictEqual(lv.capacity, 4, `L${lv.level} 混合关基准容量 4（容量池 3~5）`);
+    assert.ok(lv.capacity >= 3 && lv.capacity <= 5, `L${lv.level} 混合关基准容量 3~5（容量池 = 基准±1）`);
   }
 });
 
@@ -1279,16 +1279,16 @@ test('MX-2/AC-2：混合关生成结构 —— caps 3~5、色总量 ⊆ 瓶容�
     assert.strictEqual(logic.caps.length, logic.bottles.length, 'caps 与 bottles 平行');
     for (let i = 0; i < logic.bottles.length; i++) {
       const cap = logic.caps[i];
-      assert.ok(cap >= 3 && cap <= 5, `容量 ${cap} 应在 3~5`);
+      assert.ok(cap >= cfg.capacity - 1 && cap <= cfg.capacity + 1, `容量 ${cap} 应在 ${cfg.capacity - 1}~${cfg.capacity + 1}（容量池 = 基准±1）`);
       assert.ok(logic.bottles[i].length <= cap, `瓶 ${i} 层数 ${logic.bottles[i].length} 超自身容量 ${cap}`);
     }
-    // v2 核心不变式：每色总量 ∈ 3~5，且 sorted(色总量) 是 sorted(caps) 的子多重集
+    // v2 核心不变式：每色总量 ∈ 容量池（基准±1），且 sorted(色总量) 是 sorted(caps) 的子多重集
     // （每色存在同容量瓶可完整收纳 → 「满纯色 = 完整色」，无拆色残留）
     const count = new Array(cfg.colors).fill(0);
     for (const b of logic.bottles) for (const c of b) count[c]++;
     const capPool = logic.caps.slice().sort((a, b) => a - b);
     for (let c = 0; c < cfg.colors; c++) {
-      assert.ok(count[c] >= 3 && count[c] <= 5, `色 ${c} 总量 ${count[c]} 应在 3~5`);
+      assert.ok(count[c] >= cfg.capacity - 1 && count[c] <= cfg.capacity + 1, `色 ${c} 总量 ${count[c]} 应在 ${cfg.capacity - 1}~${cfg.capacity + 1}`);
       const at = capPool.indexOf(count[c]);
       assert.ok(at >= 0, `色 ${c} 总量 ${count[c]} 应有同容量瓶可收纳`);
       capPool.splice(at, 1);

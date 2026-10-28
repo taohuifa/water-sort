@@ -8,8 +8,19 @@
  *       （区间模式：只做生成验证 + par/bombMoves 回填，不写 md，用于分章跑控制耗时）
  */
 import { readFileSync, writeFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 import GameLogic from '../js/core/game.js';
 import { buildLevelsFromConfig, parseJsonc, COLORS } from '../js/core/levels.js';
+
+// main 守卫：solveParBFS/stateKey 等可被其他工具 import 复用，采集与回填仅在直接运行时执行
+const IS_MAIN = (() => {
+  if (!process.argv[1]) return false;
+  try {
+    return import.meta.url.toLowerCase() === pathToFileURL(process.argv[1]).href.toLowerCase();
+  } catch {
+    return false;
+  }
+})();
 
 // ---------- 命令行参数（区间 + 免报告，分章铺量用） ----------
 const argv = process.argv.slice(2);
@@ -201,9 +212,6 @@ function solveLevel(lv) {
   };
 }
 
-// ---------- 采集（按区间过滤，分章跑控制 BFS 耗时） ----------
-const results = LEVELS.filter((lv) => lv.level >= FROM && lv.level <= TO).map((lv) => ({ lv, r: solveLevel(lv) }));
-
 /**
  * BFS 最短路求解（par 用）：与 solveLevel 同源的规范化状态 key（排列等价态合并不影响最短路，
  * 合并态间转移互可实现），首次到达 isWin 的深度即最短步数。
@@ -261,6 +269,10 @@ export function solveParBFS(lv, stateCap = 1500000) {
   }
   return null;
 }
+
+// ---------- 采集（按区间过滤，分章跑控制 BFS 耗时；仅直接运行时执行） ----------
+if (IS_MAIN) {
+const results = LEVELS.filter((lv) => lv.level >= FROM && lv.level <= TO).map((lv) => ({ lv, r: solveLevel(lv) }));
 
 const parByLevel = new Map();
 const bombMovesByLevel = new Map(); // 炸弹关 bombMoves 回填（自动口径：生成确定值；显式配置不回填）
@@ -423,3 +435,4 @@ for (const x of results) {
 console.log(
   `${NO_REPORT ? '[区间模式] 未写报告' : '已写入 docs/解题报告-100关.md'}；par/bombMoves 已回填 levels.json（更新 ${bf.changed} 条记录）`
 );
+} // end IS_MAIN
