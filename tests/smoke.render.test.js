@@ -508,18 +508,19 @@ check('特殊关 AC-10：大瓶触摸 —— 命中覆盖全宽；普通瓶→�
   assert.strictEqual(logic.moveCount, 1, '点击大瓶应完成倒水');
   assert.ok(logic.bottles[big].length > 0, '大瓶应已接收液体');
   fastForward(); // 倒水动画落地后再操作
-  // 大瓶 → 普通瓶（反向：大瓶作源倒出）
+  // 大瓶只进不出（2026-10-28 规则修正）：点选大瓶 → 点空瓶，倒水应被拒绝
+  const bigBefore = logic.bottles[big].slice();
   tap(bigRect.x + bigRect.w / 2, cy);
-  assert.strictEqual(main.selected, big, '非空大瓶应可被选中');
+  assert.strictEqual(main.selected, big, '非空大瓶仍可被选中（用于提示不可倒出）');
   const emptyIdx = logic.bottles.findIndex((b, i) => i !== big && b.length === 0);
   assert.ok(emptyIdx >= 0, '特殊关应有空瓶');
   const ep = center(renderer.bottleRect(emptyIdx));
   tap(ep.x, ep.y);
-  assert.strictEqual(logic.moveCount, 2, '大瓶倒出应与普通瓶行为一致');
-  fastForward();
-  // 连续撤回两步完整恢复（撤销道具化：背包需备足 undo 存量）
+  assert.strictEqual(logic.moveCount, 1, '从大瓶倒出应被拒绝（moveCount 不变）');
+  assert.deepStrictEqual(logic.bottles[big], bigBefore, '大瓶内容不变');
+  main.selected = -1;
+  // 撤回一步完整恢复（撤销道具化：背包需备足 undo 存量）
   main.inv.undo = Math.max(main.inv.undo, 2);
-  tap(renderer.undoBtn.x, renderer.undoBtn.y);
   tap(renderer.undoBtn.x, renderer.undoBtn.y);
   assert.strictEqual(logic.moveCount, 0);
   assert.deepStrictEqual(logic.bottles[big], [logic.bigColor], '撤回后大瓶应恢复为仅含预置层');

@@ -1129,7 +1129,7 @@ test('R2 调整：大瓶瓶口颜色限制 —— 错色 canPour=0、限定色�
   assert.ok(l10.hasAnyMove(), '限制语义下开局仍应有合法步（生成器保证可解）');
 });
 
-test('AC-05/S-03：大瓶可倒出 + undo 快照含大瓶（恢复到倒入前状态）', () => {
+test('AC-05/S-03：大瓶只进不出（2026-10-28 规则修正）+ undo 快照含大瓶（恢复到倒入前状态）', () => {
   const logic = new GameLogic();
   logic.loadLevel(LEVELS[9]); // L10 特殊关
   const big = logic.bigIndex;
@@ -1146,11 +1146,14 @@ test('AC-05/S-03：大瓶可倒出 + undo 快照含大瓶（恢复到倒入前�
   assert.strictEqual(logic.bottles[big].length, 1 + amount, '大瓶应含预置层 + 倒入层');
   const emptyIdx = logic.bottles.findIndex((b, i) => i !== big && b.length === 0);
   assert.ok(emptyIdx >= 0, '特殊关应有空瓶（empties≥2）');
-  assert.ok(logic.canPour(big, emptyIdx) > 0, '大瓶应可倒出（与普通瓶规则一致）');
-  logic.pour(big, emptyIdx);
+  // 大瓶只进不出：倒出被拒绝，大瓶内容不变
+  const bigSnapshot = logic.bottles[big].slice();
+  assert.strictEqual(logic.canPour(big, emptyIdx), 0, '大瓶不可作倒水源（只进不出）');
+  assert.strictEqual(logic.pour(big, emptyIdx), null, 'pour 应拒绝从大瓶倒出');
+  assert.deepStrictEqual(logic.bottles[big], bigSnapshot, '拒绝后大瓶内容不变');
+  // 倒入 + 撤回链路（快照含大瓶）仍然正确
   logic.undo();
-  logic.undo();
-  assert.deepStrictEqual(logic.bottles, before, '连续 undo 应恢复到初始局面（快照含大瓶）');
+  assert.deepStrictEqual(logic.bottles, before, 'undo 应恢复到初始局面（快照含大瓶）');
 });
 
 test('AC-06：shuffle 不打乱大瓶 —— 大瓶 content 逐层不变、层集合不变、以大瓶现状仍可解、可撤销', () => {
@@ -1222,13 +1225,14 @@ test('S-06：shuffleOne 大瓶拒绝打乱（保护收集进度），普通多�
   if (normal >= 0) assert.ok(logic.shuffleOne(normal), '普通多色瓶可打乱');
 });
 
-test('R3 交叉：hasAnyMove 含大瓶 —— 大瓶非空可作源；仅剩大瓶相关步时正确检出；纯死局正确判定', () => {
-  // 普通瓶互相不可倒，大瓶非空（顶层 1）作为可行源
-  const logic = loadBigFixed([[0, 1], [2, 3], [1, 1, 1]], { colors: 4 });
-  assert.ok(logic.hasAnyMove());
-  assert.ok(logic.canPour(2, 0) > 0, '大瓶顶层 1 应可倒入瓶 0（顶层同色）');
-  // 纯死局：普通瓶互异色、大瓶顶层异色且未满
-  const dead = loadBigFixed([[0, 1], [1, 0], [2, 2, 2]], { colors: 3 });
+test('R3 交叉：hasAnyMove 含大瓶 —— 大瓶只进不出（仅作目标）；仅剩大瓶相关步时正确检出；纯死局正确判定', () => {
+  // 普通瓶互相不可倒；大瓶（顶层限定色 0）仅可作为倒入目标
+  const logic = loadBigFixed([[1, 0], [2, 3], [0, 0, 0]], { colors: 4, bigColor: 0 });
+  assert.ok(logic.hasAnyMove(), '瓶 0 顶层限定色可倒入大瓶');
+  assert.strictEqual(logic.canPour(2, 0), 0, '大瓶不可作倒水源（只进不出）');
+  assert.ok(logic.canPour(0, 2) > 0, '普通瓶顶层限定色可倒入大瓶');
+  // 纯死局：普通瓶互异色、无瓶顶层等于大瓶限定色
+  const dead = loadBigFixed([[0, 1], [1, 0], [2, 2, 2]], { colors: 3, bigColor: 3 });
   assert.ok(!dead.hasAnyMove(), '特殊关死局判定应同样生效');
 });
 

@@ -814,6 +814,7 @@ export default class GameLogic {
       const moves = [];
       for (let from = 0; from < n; from++) {
         if (done.has(from) || locked(from)) continue;
+        if (from === bigIdx) continue; // 大瓶只进不出（与 canPour 同步，防假可解，2026-10-28）
         for (let to = 0; to < n; to++) {
           if (from === to || done.has(to) || locked(to)) continue;
           const amount = amountOf(bs[from], bs[to], to);
@@ -1011,6 +1012,7 @@ export default class GameLogic {
     if (this.removed.has(from) || this.removed.has(to)) return 0; // 已收走的瓶不参与
     if (this.isLocked(from) || this.isLocked(to)) return 0; // 未解锁锁瓶不可作源/目标
     if (this.isCovered(from) || this.isCovered(to)) return 0; // 未揭示遮盖瓶不可作源/目标（PRD-玩法扩展 §2 A）
+    if (this.special === 'bigBottle' && from === this.bigIndex) return 0; // 大瓶只进不出（2026-10-28 规则修正，与求解器 _solvable 同步）
     if (this.special === 'bigBottle' && to === this.bigIndex) {
       // 瓶口颜色限制：大瓶只收限定色（R2 调整，与瓶口色环标识一致）
       const f = this.bottles[from];
