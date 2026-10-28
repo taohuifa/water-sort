@@ -76,6 +76,7 @@ export default class Renderer {
     load('bgMenu', 'assets/images/bg-menu.jpg'); // 菜单页
     load('bgLevels', 'assets/images/bg-levels.jpg'); // 关卡选择页
     load('bgSettings', 'assets/images/bg-settings.jpg'); // 设置页
+    load('title', 'assets/images/title.png'); // 主菜单标题艺术字（AI 生成，PRD-标题图片化 R1）
     load('plank', 'assets/images/shelf-plank.png'); // 货架木板
     load('bottle', 'assets/images/bottle-glass.png'); // 玻璃瓶素材
     load('iconBack', 'assets/images/icon-back.png');
@@ -166,6 +167,13 @@ export default class Renderer {
     // 菜单页
     this.menuPlayBtn = { x: W / 2 - 110, y: this.H * 0.52, w: 220, h: 56 };
     this.menuSettingsBtn = { x: W / 2 - 110, y: this.H * 0.52 + 76, w: 220, h: 56 };
+    // 标题热区（PRD-标题图片化与渲染测试页：R2 隐藏入口 = 连续快速点 5 次进测试页）
+    // 宽度定宽、高度在 drawMenu 按素材实际宽高比回填（素材重生成无需改此处）
+    const tW = Math.min(W * 0.92, 480);
+    this.menuTitleBtn = { x: W / 2 - tW / 2, y: this.H * 0.17 - tW / 6, w: tW, h: tW / 3 };
+    // 测试页（瓶高/层高验证沙盒）
+    this.testAddBtn = { x: W / 2 - 110, y: this.H - 148, w: 220, h: 52 };
+    this.testClearBtn = { x: W / 2 - 110, y: this.H - 82, w: 220, h: 44 };
     // 设置页
     this.settingsSoundToggle = { x: W / 2 + 30, y: this.H * 0.29, w: 52, h: 30 }; // 音效开关
     this.settingsResetBtn = { x: W / 2 - 110, y: this.H * 0.42, w: 220, h: 56 };
@@ -465,6 +473,8 @@ export default class Renderer {
   hitButton(px, py, ctx) {
     const { scene } = ctx;
     if (scene === 'menu') {
+      // 注意：标题热区 menuTitleBtn 有意不在本函数登记（R2 隐藏入口，按下态高亮会暴露彩蛋），
+      // 与 onTap 的标题连击分支构成「有意的非镜像」，勿补（P-02 命中矩阵契约仅守护已登记按钮）
       if (this.inRect(px, py, this.menuPlayBtn)) return 'menuPlayBtn';
       if (this.inRect(px, py, this.menuSettingsBtn)) return 'menuSettingsBtn';
       return null;
@@ -484,6 +494,12 @@ export default class Renderer {
           return 'level:' + i;
         }
       }
+      return null;
+    }
+    if (scene === 'test') {
+      if (this.inCircle(px, py, this.backBtn)) return 'backBtn';
+      if (this.inRect(px, py, this.testAddBtn)) return 'testAddBtn';
+      if (this.inRect(px, py, this.testClearBtn)) return 'testClearBtn';
       return null;
     }
     // game 场景（浮层按 onTap 同序：winPanel → adConfirm → failPanel → bigIntro → pauseOverlay → 常规；
@@ -540,6 +556,8 @@ export default class Renderer {
       this.drawLevelSelect(state);
     } else if (state.scene === 'loading') {
       this.drawLoading(state);
+    } else if (state.scene === 'test') {
+      this.drawTest(state);
     } else {
       this.drawGame(state);
     }
@@ -721,41 +739,24 @@ export default class Renderer {
 
   drawMenu(state) {
     const { ctx } = this;
-    // 标题
-    ctx.textAlign = 'center';
-    ctx.fillStyle = '#8A5A22';
-    ctx.font = 'bold 40px sans-serif';
-    ctx.fillText('缤纷果汁铺', this.W / 2, this.H * 0.17);
+    // 标题（R1：AI 生成艺术字图 drawImage；素材未就绪降级为原文字标题）
+    const title = this.images.title;
+    const tb = this.menuTitleBtn;
+    ctx.textAlign = 'center'; // 副标题等后续文本统一居中（图片分支不经过原 fillText 前置设置）
+    if (title && title.width) {
+      // 高度按素材实际宽高比回填（等比不拉伸），垂直中心对齐 H*0.17
+      tb.h = (tb.w * title.height) / title.width;
+      tb.y = this.H * 0.17 - tb.h / 2;
+      ctx.drawImage(title, tb.x, tb.y, tb.w, tb.h);
+    } else {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#8A5A22';
+      ctx.font = 'bold 40px sans-serif';
+      ctx.fillText('缤纷果汁铺', this.W / 2, this.H * 0.17);
+    }
     ctx.font = 'bold 14px sans-serif';
     ctx.fillStyle = '#7A5C3E';
-    ctx.fillText('JuiceSort · 倒水排序', this.W / 2, this.H * 0.17 + 32);
-
-    // 装饰瓶子
-    const deco = [
-      [[0, 0, 1, 1], null],
-      [[2, 3, 2, 3], [4]],
-      [[5, 6, 5, 6], [7]],
-    ];
-    const bw = 32;
-    const bh = bw * BOTTLE_ASPECT; // 矮胖奶瓶，与游戏内一致
-    const gap = 26;
-    const startX = this.W / 2 - ((deco.length * bw + (deco.length - 1) * gap) / 2);
-    const savedCap = this.capacity; // 菜单装饰瓶恒按容量 4 绘制（不受本关容量影响）
-    this.capacity = 4;
-    deco.forEach((d, i) => {
-      const rect = {
-        x: startX + i * (bw + gap),
-        y: this.H * 0.24,
-        w: bw,
-        h: bh,
-      };
-      this.drawBottle(rect, d[0], false, false);
-      if (d[1]) {
-        const rect2 = { x: rect.x + rect.w / 2 - 8, y: rect.y + rect.h + 10, w: 16, h: 16 * BOTTLE_ASPECT };
-        this.drawBottle(rect2, d[1], false, false);
-      }
-    });
-    this.capacity = savedCap;
+    ctx.fillText('JuiceSort · 倒水排序', this.W / 2, tb.y + tb.h + 26);
 
     // 开始 / 设置按钮
     const playLabel = state.hasProgress ? '继续闯关' : '开始游戏';
@@ -775,6 +776,67 @@ export default class Renderer {
     ctx.font = 'bold 12px sans-serif';
     ctx.fillStyle = '#8A6234';
     ctx.fillText(`已通关 ${state.cleared} / ${this.levelCount} 关`, this.W / 2, this.menuSettingsBtn.y + 110);
+  }
+
+  // ---------- 测试页（隐藏入口进入，PRD-标题图片化与渲染测试页 R3） ----------
+
+  /**
+   * 测试页：cap2~cap5 四瓶并排、底部对齐——层高全页统一、瓶高 = 层高×容量
+   * （瓶高∝容量口径的可视化验证沙盒）。
+   * 瓶矩形高度按 drawBottleLiquid 的内液区口径反推（素材三段 / 降级圆角两分支），
+   * 保证「装满时液面贴瓶口」且每层渲染高度恒等于 layerH。
+   */
+  drawTest(state) {
+    const { ctx } = this;
+    const caps = state.testCaps;
+    const layersArr = state.testLayers;
+    if (!caps) return;
+    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', pressed: this.pressed === 'backBtn' });
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#8A5A22';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.fillText('瓶高 ∝ 容量 · 层高统一（验证沙盒）', this.W / 2, this.H * 0.135); // 下移避开左上返回键（capCenterY 同高）
+
+    const bw = 56;
+    const gap = 30;
+    const spriteG = this.images.bottle;
+    const tplOn = !!(spriteG && spriteG.width); // 素材三段口径（与 drawBottleLiquid tplOn 分支一致）
+    const segTop = tplOn ? spriteG.height * BOTTLE_TOP_FRAC * (bw / spriteG.width) : 0;
+    const segBot = tplOn ? spriteG.height * BOTTLE_BOT_FRAC * (bw / spriteG.width) : 0;
+    // 层高与游戏内同算法：= 同宽 cap4 游戏瓶的内液区高度 ÷ 4（cap4 瓶与游戏 1:1 等高，
+    // 其余容量按「瓶高 = 层高×容量 + 固定段」缩放），预览比例与真实关卡一致。
+    // 降级分支与 drawBottleLiquid 的 fit && !tplOn 口径严格同构（innerY=y+0.08h、innerH=0.92h−3.5）
+    const layerH = tplOn
+      ? (bw * BOTTLE_ASPECT - segTop - segBot * 0.4) / 4
+      : (bw * BOTTLE_ASPECT * 0.92 - 3.5) / 4;
+    const baseY = this.H * 0.68; // 四瓶底部对齐线
+    const hOf = (cap) => (tplOn
+      ? cap * layerH + segTop + segBot * 0.4
+      : (cap * layerH + 3.5) / 0.92);
+    const totalW = caps.length * bw + (caps.length - 1) * gap;
+    const x0 = this.W / 2 - totalW / 2;
+    caps.forEach((cap, i) => {
+      const h = hOf(cap);
+      const rect = { x: x0 + i * (bw + gap), y: baseY - h, w: bw, h };
+      this.drawBottle(rect, layersArr[i] || [], false, false, -1, cap);
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillStyle = '#7A5C3E';
+      ctx.fillText(`cap${cap}`, rect.x + bw / 2, baseY + 22);
+    });
+
+    this.drawTextButton(this.testAddBtn, '新增液体', {
+      fill: '#FF9838',
+      text: '#FFFFFF',
+      size: 19,
+      pressed: this.pressed === 'testAddBtn',
+    });
+    this.drawTextButton(this.testClearBtn, '清空', {
+      fill: 'rgba(255,255,255,0.92)',
+      stroke: '#E8C9A0',
+      text: '#8A6234',
+      size: 17,
+      pressed: this.pressed === 'testClearBtn',
+    });
   }
 
   // ---------- 设置页 ----------

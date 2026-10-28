@@ -1,5 +1,6 @@
 import GameLogic, { BOMB_REVIVE_BONUS, MOVE_REVIVE_BONUS, TIME_REVIVE_BONUS } from './core/game.js';
 import { buildLevelsFromConfig, parseJsonc, COLORS } from './core/levels.js';
+import Rng from './core/rng.js';
 import { applyGrant, canConsume, consume, mergeInventory } from './core/inventory.js';
 import { calcStars, mergeRecord, sanitizeRecord } from './core/stars.js';
 import Renderer from './render/renderer.js';
@@ -85,7 +86,12 @@ export default class Main {
     this.failDelay = 0; // 引爆闪光累计时长（0.6s 后弹失败面板）
     this.failFlashIdx = -1; // 引爆瓶下标（-1 = 无闪光；时间/步数失败无闪光，仅延时弹窗）
     this.failLatch = false; // 失败检测门闩（首次 isFailed 记录闪光/计时起点，避免时间/步数失败每帧重置）
-    this.scene = 'menu'; // 'menu' | 'settings' | 'levelSelect' | 'game'
+    this.scene = 'menu'; // 'menu' | 'settings' | 'levelSelect' | 'game' | 'test'
+    this.testCaps = null; // 测试页（隐藏入口）：沙盒瓶容量组 [2,3,4,5]
+    this.testLayers = null; // 测试页：各沙盒瓶已加液体层（颜色 id 数组）
+    this._titleTaps = 0; // 标题连击计数（R2 隐藏入口）
+    this._titleTapsTs = 0;
+    this.testRng = null; // 测试页随机取色（openTest 注入 seed）
     this.pauseOverlay = false;
     this.inv = mergeInventory(wx.getStorageSync(INV_KEY)); // 全局道具背包（PRD-道具背包，废除每关出厂 props）
     this.granted = this._readGranted(); // 首入赠送已发放标记
@@ -269,6 +275,26 @@ export default class Main {
     this.beginLevelLoad((this.levelIndex + 1) % LEVEL_COUNT);
   }
 
+  /** 标题 5 连击检测（R2 隐藏入口）：间隔 <600ms 连续 5 次进测试页，超时/中断重置 */
+  _trackTitleTap() {
+    const now = Date.now();
+    this._titleTaps = now - this._titleTapsTs < 600 ? this._titleTaps + 1 : 1;
+    this._titleTapsTs = now;
+    if (this._titleTaps >= 5) {
+      this._titleTaps = 0;
+      this.openTest();
+    }
+  }
+
+  /** 进入测试页（PRD-标题图片化与渲染测试页 R3）：cap2~cap5 空瓶沙盒 */
+  openTest() {
+    this.audio.play('button');
+    this.testCaps = [2, 3, 4, 5];
+    this.testLayers = [[], [], [], []];
+    this.testRng = new Rng((Math.random() * 0xffffffff) >>> 0); // 随机取色（可注入 seed）
+    this.scene = 'test';
+  }
+
   // ---------- 触摸交互 ----------
 
   /**
@@ -327,11 +353,35 @@ export default class Main {
     // ---------- 菜单页 ----------
     if (this.scene === 'menu') {
       if (this.renderer.inRect(x, y, this.renderer.menuPlayBtn)) {
+        this._titleTaps = 0; // 连击被打断即重置（R2：仅标题连击有效）
         this.audio.play('button');
         this.openLevelSelect();
       } else if (this.renderer.inRect(x, y, this.renderer.menuSettingsBtn)) {
+        this._titleTaps = 0; // 同上
         this.audio.play('button');
         this.scene = 'settings';
+      } else if (this.renderer.inRect(x, y, this.renderer.menuTitleBtn)) {
+        this._trackTitleTap(); // R2 隐藏入口：标题 5 连击（无任何可见反馈）
+      }
+      return;
+    }
+
+    // ---------- 测试页（隐藏入口，瓶高/层高验证沙盒） ----------
+    if (this.scene === 'test') {
+      if (this.renderer.inCircle(x, y, this.renderer.backBtn)) {
+        this.audio.play('button');
+        this.scene = 'menu';
+      } else if (this.renderer.inRect(x, y, this.renderer.testAddBtn)) {
+        this.audio.play('button');
+        // 每瓶顶层各加一层（随机取色 0~7），装满后不再加
+        this.testCaps.forEach((cap, i) => {
+          if (this.testLayers[i].length < cap) {
+            this.testLayers[i].push(Math.floor(this.testRng.next() * 8));
+          }
+        });
+      } else if (this.renderer.inRect(x, y, this.renderer.testClearBtn)) {
+        this.audio.play('button');
+        this.testLayers = [[], [], [], []];
       }
       return;
     }
@@ -806,7 +856,8 @@ export default class Main {
       this.bigIntro, R.levelScroll,
       this.inv.undo, this.inv.shuffle, this.inv.addBottle, this.inv.revive,
       moves, par, stars, covers.join(','), completedCount,
-      bombs.join(','), fail, timeLeft, moveLimit, failReason, genAttempts].join('|');
+      bombs.join(','), fail, timeLeft, moveLimit, failReason, genAttempts,
+      this.testLayers ? this.testLayers.map((l) => l.length).join(',') : ''].join('|');
     const now = Date.now();
     if (sig === this._dbgSig && now - this._dbgTs < 2000) return;
     this._dbgSig = sig;
@@ -826,7 +877,10 @@ export default class Main {
         btns: {
           play: {xy: cRect(R.menuPlayBtn), scenes: ['menu']},
           settings: {xy: cRect(R.menuSettingsBtn), scenes: ['menu']},
-          back: {xy: cCircle(R.backBtn), scenes: ['levelSelect', 'settings', 'game']},
+          title_easteregg: {xy: cRect(R.menuTitleBtn), scenes: ['menu']}, // R2 隐藏入口（5 连击），自动化直达测试页
+          back: {xy: cCircle(R.backBtn), scenes: ['levelSelect', 'settings', 'game', 'test']},
+          test_add: {xy: cRect(R.testAddBtn), scenes: ['test']},
+          test_clear: {xy: cRect(R.testClearBtn), scenes: ['test']},
           pause_resume: {xy: cRect(R.pauseResumeBtn), scenes: ['game'], when: {pause: true}},
           pause_exit: {xy: cRect(R.pauseExitBtn), scenes: ['game'], when: {pause: true}},
           next: {xy: cRect(R.nextBtn), scenes: ['game'], when: {win: true}},
@@ -956,6 +1010,9 @@ export default class Main {
       specials: SPECIAL_FLAGS,
       // 生成进度（F-04 加载页进度条用；非 loading 场景为 0/0）
       genElapsedMs: this.scene === 'loading' && this.logic.genProgress() ? this.logic.genProgress().elapsedMs : 0,
+      // 测试页沙盒瓶（PRD-标题图片化与渲染测试页 R3；渲染层只读显示）
+      testCaps: this.testCaps,
+      testLayers: this.testLayers,
       genBudgetMs: this.scene === 'loading' && this.logic.genProgress() ? this.logic.genProgress().budgetMs : 0,
     });
 
