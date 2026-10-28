@@ -867,7 +867,7 @@ check('混合容量关渲染：第 11 关（原 L26）底对齐、瓶高 ∝ 容
     assert.ok(Math.abs(r.h / r.w - (aspectFloor * logic.caps[i]) / capFloor) < 0.4, `瓶 ${i} 高宽比应 ∝ 容量`);
     assert.strictEqual(logic.bottles[i].length <= logic.caps[i], true, `瓶 ${i} 层数不超容量`);
   }
-  // 行内底对齐：同排瓶底 y 一致
+  // 行内近似底对齐：散布纵向抖动 ±22px（F-散布布局），排内瓶底差 ≤ 44px
   const n = logic.bottles.length;
   const cols = Math.max(2, Math.ceil(n / 2));
   for (let r = 0; r * cols < n; r++) {
@@ -876,8 +876,14 @@ check('混合容量关渲染：第 11 关（原 L26）底对齐、瓶高 ∝ 容
       const rect = renderer.bottleRects[r * cols + c];
       const b = rect.y + rect.h;
       if (bottom === null) bottom = b;
-      else assert.strictEqual(b, bottom, `第 ${r} 排应底对齐`);
+      else assert.ok(Math.abs(b - bottom) <= 44, `第 ${r} 排应近似底对齐（差 ${Math.abs(b - bottom)}px）`);
     }
+  }
+  // 散布可复现：同 seed 重新布局 → rect 完全一致
+  {
+    const snapshot = JSON.stringify(renderer.bottleRects);
+    main.refreshBoard();
+    assert.strictEqual(JSON.stringify(renderer.bottleRects), snapshot, '散布布局应随 seed 复现');
   }
   // 层厚全局一致：测试桩无贴图（截距补偿 k=0），层高 = 瓶高 / 容量，跨容量必须相等
   // （真机口径：瓶高 = 容量×层厚 + 截距C，液体内高 ∝ 容量，同归此断言意图）

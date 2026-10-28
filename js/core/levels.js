@@ -104,6 +104,7 @@ export function buildLevelsFromConfig(cfg) {
       mix: r.mix ?? defaults.mix ?? false,
       special: r.special ?? defaults.special ?? null,
       bigCapacity: num(r.bigCapacity, num(defaults.bigCapacity, 0)),
+      bigLayout: r.bigLayout ?? defaults.bigLayout ?? null, // 大瓶布局模式：'rows'|'sides'|'ring'（null = rows）
       maxBottles: num(r.maxBottles, num(defaults.maxBottles, 12)), // 加瓶上限（GameLogic.addBottle 用）
       // 遮盖瓶（PRD-玩法扩展 §2 A）：数量与每瓶遮盖层数，规则见 game.js isCovered/coverLeft
       coverCount: num(r.coverCount, num(defaults.coverCount, 0)),
@@ -149,6 +150,10 @@ function _validateSpecial(lv, level) {
     delete lv.special;
     delete lv.bigCapacity;
     return;
+  }
+  if (lv.bigLayout && !['rows', 'sides', 'ring'].includes(lv.bigLayout)) {
+    console.warn(`[levels] L${level} bigLayout=${lv.bigLayout} 非法（可选 rows/sides/ring），回退 rows`);
+    lv.bigLayout = null;
   }
   const forceZero = [
     ['hiddenCount', '隐藏层'],

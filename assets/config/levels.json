@@ -61,7 +61,7 @@
     { "level": 8, "par": 20, "colors": 6, "hiddenCount": 3, "seed": 110 }, // ← 原 L9
     { "level": 9, "par": 20, "colors": 6, "hiddenCount": 3, "seed": 109 }, // ← 原 L8
     // 特殊关① 大瓶收集首秀（8 层大瓶，4 色纯机制教学）
-    { "level": 10, "par": 14, "special": "bigBottle", "bigCapacity": 8, "colors": 4, "empties": 2 },
+    { "level": 10, "par": 14, "special": "bigBottle", "bigCapacity": 8, "bigLayout": "ring", "colors": 4, "empties": 2 },
     // 中段 11~19：混合首秀（选实测最易的混合牌面）→ 7 色 → 8 色渐入 → 段末冲高
     { "level": 11, "par": 22, "mix": true, "colors": 6, "empties": 1, "seed": 127, "grant": { "shuffle": 1, "addBottle": 1 } }, // 混合首秀 ← 原 L26
     { "level": 12, "par": 20, "colors": 7, "hiddenCount": 4 },
@@ -85,7 +85,7 @@
     { "level": 28, "par": 22, "seed": 4141677, "colors": 8, "empties": 1, "hiddenCount": 5, "condLockCount": 1, "keyLockCount": 1, "coverCount": 1 }, // 双锁合璧 + 遮盖（coverLayers=2 与条件锁 need=2 同拍揭示）· seed 显式固化并重摇（机制合入钥匙修复后 129 号牌面可解率掉出预算，同 L48 口径）
     { "level": 29, "par": 20, "seed": 2259332, "colors": 7, "hiddenCount": 4, "noEmptyStart": true, "coverCount": 2 }, // 无空瓶首秀 + 双遮盖（遮盖压力峰值）
     // 特殊关③ 终局 Boss（cap5 普通瓶 + 8 层大瓶收官）
-    { "level": 30, "par": 20, "special": "bigBottle", "bigCapacity": 8, "colors": 6, "capacity": 5, "empties": 2 },
+    { "level": 30, "par": 20, "special": "bigBottle", "bigCapacity": 8, "bigLayout": "sides", "colors": 6, "capacity": 5, "empties": 2 },
 
     // ═════════ L31~L100：10 章铺量（PRD-100关扩充 §3，设计见 docs/design/关卡扩充-100关-实现.md §3）═════════
     // seed 一律 = 101 + 关卡号（全量固化显式写入，防未来重排）；par/bombMoves 由 tools/solve-report.mjs 回填。

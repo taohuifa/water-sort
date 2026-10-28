@@ -1,4 +1,5 @@
 import { COLORS } from '../core/levels.js';
+import Rng from '../core/rng.js';
 
 /**
  * 渲染层：Canvas 2D 绘制所有内容 —— 背景、吧台货架、玻璃瓶与液体分层、
@@ -182,7 +183,7 @@ export default class Renderer {
    * 宽度为普通瓶 1.8 倍，高度按 bigCapacity 走同一 ±11%/层 伸缩公式；
    * 尺寸由「行宽不越界」与「2·bh + 2·gapY + bigH ≤ 安全区高」联立约束解出。
    */
-  setupBoard(bottleCount, capacity = 4, bigIdx = -1, bigCapacity = 0, caps = null) {
+  setupBoard(bottleCount, capacity = 4, bigIdx = -1, bigCapacity = 0, caps = null, seed = 0, bigLayout = null) {
     this.capacity = capacity;
     this.bigIdx = bigIdx;
     this.bigCapacity = bigIdx >= 0 ? bigCapacity : 0;
@@ -190,7 +191,7 @@ export default class Renderer {
     const n = bottleCount;
     const margin = 18;
     const gapX = 12;
-    const gapY = 20;
+    const gapY = 48; // 行距（含散布纵向抖动 ±22px 的余量，保证行间不重叠）
     const playTop = 252;
     const playBottom = this.H - 128;
     const availW = this.W - margin * 2;
@@ -198,22 +199,117 @@ export default class Renderer {
 
     this.bottleRects = [];
     if (bigIdx >= 0 && bigCapacity > 0 && bigIdx < n) {
-      // 特殊关布局：上排 ⌈(n-1)/2⌉ 个普通瓶 / 中带大瓶 / 下排余量普通瓶（R2 棋盘形态）
-      const normals = n - 1;
-      const topCount = Math.max(1, Math.ceil(normals / 2));
-      const botCount = normals - topCount;
-      const cols = Math.max(topCount, botCount, 1);
+      // 特殊关布局（bigLayout 可配置）：rows（默认）= 上排/中带大瓶/下排（R2 棋盘）；
+      // sides = 大瓶居中、普通瓶左右两列夹持（吧台摆位）；ring = 普通瓶上排 + 左右两列环绕大瓶。
+      // 三种模式均保证瓶与瓶/大瓶不重叠。
       const aspectN = BOTTLE_ASPECT * (1 + (capacity - 4) * 0.11);
       // 竖向预算（特殊关专属收紧，普通关不受影响）：上界贴近货架、下界贴近按钮排
       const sTop = 248;
       const sBottom = this.H - 116;
       const sAvailH = sBottom - sTop;
       const vGap = 14; // 上排/大瓶/下排之间的行距（比普通关 30 紧，换取瓶宽）
+      const bigRows = bigCapacity / capacity; // 大瓶折算普通瓶高的倍数
+      const mode = bigLayout === 'sides' || bigLayout === 'ring' ? bigLayout : 'rows';
+      if (mode === 'ring') {
+        // —— 圆形环绕：普通瓶沿椭圆均布围住居中大瓶（自正上方起），重叠则整体放大半径迭代 ——
+        const normalsC = n - 1;
+        const edge = gapX * 2; // 瓶与大瓶/画布边缘的间距
+        // 尺寸预算：环带总高 = bigH + 2×edge + 2×bh ≤ sAvailH；宽 = 2bw + bigW + 2×edge ≤ availW
+        const hCapBh = (sAvailH - 2 * edge) / (bigRows + 2);
+        const wCapBw = (availW - 2 * edge) / (2 + (bigRows * aspectN) / BOTTLE_ASPECT);
+        const bw = Math.max(20, Math.min(60, hCapBh / aspectN, wCapBw));
+        const bh = bw * aspectN;
+        const bigH = bigRows * bh;
+        const bigW = Math.min(bigH / BOTTLE_ASPECT, availW - 2 * bw - 2 * edge);
+        const cx = this.W / 2;
+        const cy = sTop + sAvailH / 2;
+        this.bottleRects[bigIdx] = { x: cx - bigW / 2, y: cy - bigH / 2, w: bigW, h: bigH };
+        const idxs = [];
+        for (let i = 0; i < n; i++) if (i !== bigIdx) idxs.push(i);
+        const m = idxs.length;
+        let rx = bigW / 2 + edge + bw / 2;
+        let ry = bigH / 2 + edge + bh / 2;
+        for (let iter = 0; iter < 40; iter++) {
+          const pts = idxs.map((_, a) => {
+            const th = -Math.PI / 2 + (a * 2 * Math.PI) / m;
+            return { x: cx + rx * Math.cos(th), y: cy + ry * Math.sin(th) };
+          });
+          let clash = false;
+          for (let a = 0; a < m && !clash; a++) {
+            for (let b = a + 1; b < m; b++) {
+              if (Math.abs(pts[a].x - pts[b].x) < bw + 2 && Math.abs(pts[a].y - pts[b].y) < bh + 2) {
+                clash = true;
+                break;
+              }
+            }
+          }
+          if (!clash) break;
+          rx *= 1.04;
+          ry *= 1.04;
+        }
+        idxs.forEach((i, a) => {
+          const th = -Math.PI / 2 + (a * 2 * Math.PI) / m;
+          this.bottleRects[i] = {
+            x: cx + rx * Math.cos(th) - bw / 2,
+            y: Math.max(sTop, Math.min(cy + ry * Math.sin(th) - bh / 2, sBottom - bh)), // 出界兜底钳制
+            w: bw,
+            h: bh,
+          };
+        });
+        return;
+      }
+      if (mode !== 'rows') {
+        // —— sides 夹持模式：普通瓶左右两列站立，大瓶正中，互不重叠 ——
+        const normalsS = n - 1;
+        const topCount = mode === 'ring' ? Math.min(normalsS, Math.max(1, Math.round(normalsS / 3))) : 0;
+        const perCol = Math.ceil((normalsS - topCount) / 2);
+        const colGap = 14; // 列内瓶距
+        // 高度预算解 bh：sides → colH ≤ sAvailH；ring → bh + vGap + max(colH, bigH) ≤ sAvailH
+        const hCapBh =
+          mode === 'sides'
+            ? (sAvailH - (perCol - 1) * colGap) / perCol
+            : (sAvailH - vGap - (perCol - 1) * colGap) / (1 + Math.max(perCol, bigRows));
+        // 宽度预算：2×列宽 + 大瓶宽 + 4×gapX ≤ availW（bigW = bigRows×bh/BOTTLE_ASPECT）
+        const wCapBw = (availW - 4 * gapX) / (2 + (bigRows * aspectN) / BOTTLE_ASPECT);
+        const bw = Math.max(20, Math.min(60, hCapBh / aspectN, wCapBw));
+        const bh = bw * aspectN;
+        const bigH = bigRows * bh;
+        const bigW = Math.min(bigH / BOTTLE_ASPECT, availW - 2 * bw - 4 * gapX);
+        const colH = perCol * bh + (perCol - 1) * colGap;
+        const blockH = Math.max(colH, bigH);
+        const topY = mode === 'ring' ? sTop + (sAvailH - (bh + vGap + blockH)) / 2 : 0;
+        const baseline =
+          mode === 'ring' ? topY + bh + vGap + blockH : sTop + (sAvailH - blockH) / 2 + blockH;
+        const colEdge = gapX * 2; // 列与大瓶水平间距
+        const leftX = this.W / 2 - bigW / 2 - colEdge - bw;
+        const rightX = this.W / 2 + bigW / 2 + colEdge;
+        const normalIdxs = [];
+        for (let i = 0; i < n; i++) if (i !== bigIdx) normalIdxs.push(i);
+        this.bottleRects[bigIdx] = { x: (this.W - bigW) / 2, y: baseline - bigH, w: bigW, h: bigH };
+        let placed = 0;
+        if (mode === 'ring') {
+          const rowW = topCount * bw + (topCount - 1) * gapX;
+          const tx0 = (this.W - rowW) / 2;
+          for (let c = 0; c < topCount; c++, placed++) {
+            this.bottleRects[normalIdxs[placed]] = { x: tx0 + c * (bw + gapX), y: topY, w: bw, h: bh };
+          }
+        }
+        normalIdxs.slice(placed).forEach((i, t) => {
+          const x = t % 2 === 0 ? leftX : rightX;
+          const slot = Math.floor(t / 2);
+          this.bottleRects[i] = { x, y: baseline - (slot + 1) * bh - slot * colGap, w: bw, h: bh };
+        });
+        return;
+      }
+      // rows 模式（R2 棋盘）：上排 ⌈(n-1)/2⌉ 个普通瓶 / 中带大瓶 / 下排余量普通瓶
+      const normals = n - 1;
+      const topCount = Math.max(1, Math.ceil(normals / 2));
+      const botCount = normals - topCount;
+      const cols = Math.max(topCount, botCount, 1);
       // 宽度约束：行内不越界（含 60px 常规上限）；大瓶宽由高度反推（瓶形 1:BOTTLE_ASPECT 比例），仅需防越界
       const wCap = Math.min(60, (availW - (cols - 1) * gapX) / cols);
       // 高度约束（统一层厚：大瓶层厚 = 普通瓶层厚，bigH = bigCap/cap × bh）：
       // 上排 bh + vGap + bigH + vGap + 下排 bh ≤ sAvailH
-      const bigRows = bigCapacity / capacity; // 大瓶折算普通瓶高的倍数
       const hCap = (sAvailH - 2 * vGap) / (aspectN * (2 + bigRows));
       const bw = Math.max(20, Math.min(wCap, hCap));
       const bh = bw * aspectN;
@@ -244,7 +340,7 @@ export default class Renderer {
       const cols = Math.max(2, Math.ceil(n / 2));
       const rows = Math.ceil(n / cols);
       const aspect = BOTTLE_ASPECT * (1 + (capacity - 4) * 0.11);
-      let bw = Math.min(60, (availW - (cols - 1) * gapX) / cols);
+      let bw = Math.min(76, (availW - (cols - 1) * (gapX + 16)) / cols); // 宽上限 76：行数少时瓶放大填棋盘（行宽约束兜底），并预留散布缝隙余量
       const rowMax = [];
       for (let r = 0; r < rows; r++) {
         let m = 1;
@@ -266,16 +362,20 @@ export default class Renderer {
       const unitH = (bw * (BOTTLE_ASPECT_FLOOR - k)) / capFloor; // 统一层厚（全关一致，含截距下限口径）
       const rowHs = rowMax.map((m) => m * unitH + k * bw);
       const gridH = rowHs.reduce((s, h) => s + h, 0) + (rows - 1) * gapY;
-      const gridW = cols * bw + (cols - 1) * gapX;
-      const startX = (this.W - gridW) / 2;
       const startY = playTop + (availH - gridH) / 2;
+      // 离散散布：行内瓶距随机（rng 可复现）+ 每瓶纵向抖动（±22px < 行距 48px，钳制安全区保证不重叠）
+      const rng = new Rng((seed ^ 0x5f3759df) >>> 0);
       let yBase = startY;
       for (let r = 0; r < rows; r++) {
-        const rowBottom = yBase + rowHs[r]; // 行基线（行底），行内底对齐
-        for (let c = 0; c < cols && r * cols + c < n; c++) {
+        const rowBottom = yBase + rowHs[r]; // 行基线（行底）
+        const m = Math.min(cols, n - r * cols);
+        const xs = this._scatterRowXs(m, bw, availW, rng);
+        for (let c = 0; c < m; c++) {
           const i = r * cols + c;
-          const hi = unitH * caps[i] + k * bw; // 瓶高含瓶口/圆底截距补偿（与 rowHs 同口径，保证底对齐与层厚一致）
-          this.bottleRects[i] = { x: startX + c * (bw + gapX), y: rowBottom - hi, w: bw, h: hi };
+          const hi = unitH * caps[i] + k * bw; // 瓶高含瓶口/圆底截距补偿（与 rowHs 同口径，保证层厚一致）
+          const dy = (rng.next() * 2 - 1) * 22;
+          const yy = Math.max(playTop, Math.min(rowBottom - hi + dy, playBottom - hi)); // 安全区钳制
+          this.bottleRects[i] = { x: xs[c], y: yy, w: bw, h: hi };
         }
         yBase = rowBottom + gapY;
       }
@@ -286,28 +386,52 @@ export default class Renderer {
     const rows = Math.ceil(n / cols);
 
     const aspect = BOTTLE_ASPECT * (1 + (capacity - 4) * 0.11); // 瓶高随容量伸缩，画布安全区由下方压缩逻辑 clamp
-    let bw = Math.min(60, (availW - (cols - 1) * gapX) / cols);
+    let bw = Math.min(76, (availW - (cols - 1) * (gapX + 16)) / cols); // 宽上限 76：行数少时瓶放大填棋盘（行宽约束兜底），并预留散布缝隙余量
     let bh = bw * aspect; // 矮胖奶瓶瓶形（BOTTLE_ASPECT 基准）
     const needH = rows * bh + (rows - 1) * gapY;
     if (needH > availH) {
       bh = (availH - (rows - 1) * gapY) / rows;
       bw = bh / aspect;
     }
-    const gridW = cols * bw + (cols - 1) * gapX;
     const gridH = rows * bh + (rows - 1) * gapY;
-    const startX = (this.W - gridW) / 2;
     const startY = playTop + (availH - gridH) / 2;
 
+    // 离散散布：行内瓶距随机（rng 可复现）+ 每瓶纵向抖动（±22px < 行距 48px，钳制安全区保证不重叠）
+    const rng = new Rng((seed ^ 0x5f3759df) >>> 0);
+    let rowXs = null;
     for (let i = 0; i < n; i++) {
       const r = Math.floor(i / cols);
       const c = i % cols;
+      if (c === 0) rowXs = this._scatterRowXs(Math.min(cols, n - r * cols), bw, availW, rng);
+      const dy = (rng.next() * 2 - 1) * 22;
+      const yy = Math.max(playTop, Math.min(startY + r * (bh + gapY) + dy, playBottom - bh)); // 安全区钳制
       this.bottleRects.push({
-        x: startX + c * (bw + gapX),
-        y: startY + r * (bh + gapY),
+        x: rowXs[c],
+        y: yy,
         w: bw,
         h: bh,
       });
     }
+  }
+
+  /** 一行 m 瓶的离散 x 坐标：瓶距 = 基础缝 12px + 随机份额（seed 可复现），两端均分居中，保证不重叠 */
+  _scatterRowXs(m, bw, availW, rng) {
+    const baseGap = 12;
+    const slack = Math.max(0, availW - m * bw - (m - 1) * baseGap);
+    const weights = [];
+    let wSum = 0;
+    for (let i = 0; i < m - 1; i++) {
+      const w = 0.35 + rng.next();
+      weights.push(w);
+      wSum += w;
+    }
+    let x = (this.W - (m * bw + (m - 1) * baseGap + slack)) / 2;
+    const xs = [];
+    for (let i = 0; i < m; i++) {
+      xs.push(x);
+      x += bw + baseGap + (i < m - 1 ? (slack * weights[i]) / (wSum || 1) : 0);
+    }
+    return xs;
   }
 
   /** 瓶 i 的绘制容量（混合关 = caps[i]；大瓶 = bigCapacity；其余 = this.capacity；S-07 层高自适应） */

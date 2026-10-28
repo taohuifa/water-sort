@@ -253,12 +253,15 @@ export default class Main {
 
   /** 按当前逻辑局面的瓶数/容量/大瓶参数重算布局（loadLevel / undo / addBottle 共用，S-08） */
   refreshBoard() {
+    const lv = LEVELS[this.levelIndex] || {};
     this.renderer.setupBoard(
       this.logic.bottles.length,
       this.logic.capacity,
       this.logic.bigIndex,
       this.logic.bigCapacity,
-      this.logic.mix ? this.logic.caps : null
+      this.logic.mix ? this.logic.caps : null,
+      lv.seed || 0, // 散布种子（与发牌同源可复现）
+      lv.bigLayout || null // 大瓶布局模式（rows/sides/ring，缺省 rows）
     );
   }
 
