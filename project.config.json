@@ -76,6 +76,10 @@
         "type": "folder"
       },
       {
+        "value": "assets/images/ui-src",
+        "type": "folder"
+      },
+      {
         "value": "assets/images/backup",
         "type": "folder"
       },

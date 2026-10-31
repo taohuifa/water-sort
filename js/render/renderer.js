@@ -94,11 +94,30 @@ export default class Renderer {
     load('plank', 'assets/images/shelf-plank.png'); // 货架木板
     load('bottle', 'assets/images/bottle-glass.png'); // 玻璃瓶素材
     load('iconBack', 'assets/images/icon-back.png');
-    load('iconUndo', 'assets/images/icon-undo.png');
-    load('iconShuffle', 'assets/images/icon-shuffle.png');
-    load('iconAdd', 'assets/images/icon-add.png');
-    load('iconRevive', 'assets/images/icon-revive.png'); // 续杯图标（AI 生成，与既有金黄圆钮图标同风格）
+    // 游戏页按钮图标与选关页道具行同款（设计稿同源）：共用 it-*.png，不再保留 icon-* 重复文件
+    load('iconUndo', 'assets/images/it-undo.png');
+    load('iconShuffle', 'assets/images/it-shuffle.png');
+    load('iconAdd', 'assets/images/it-add.png');
+    load('iconRevive', 'assets/images/it-revive.png'); // 续杯图标
     load('iconRestart', 'assets/images/icon-restart.png');
+    // UI 资源（AI 生成，风格参考 docs/ui-reference.png）：按钮/卡片底图，未就绪降级程序化绘制
+    load('btnPrimary', 'assets/images/btn-primary.png');
+    load('btnSecondary', 'assets/images/btn-secondary.png');
+    load('btnBack', 'assets/images/btn-back.png');
+    load('cardCleared', 'assets/images/card-cleared.png');
+    load('cardNormal', 'assets/images/card-normal.png');
+    load('cardLocked', 'assets/images/card-locked.png');
+    // 选关页道具行图标（参考图抠图，扁平卡通风；与游戏页金币徽章 icon-* 区分）
+    load('itUndo', 'assets/images/it-undo.png');
+    load('itShuffle', 'assets/images/it-shuffle.png');
+    load('itAdd', 'assets/images/it-add.png');
+    load('itRevive', 'assets/images/it-revive.png');
+    // 选关卡片徽章/星星（设计稿 ui-reference-levels-v2.png 抠图）：✓圆徽 / 挑战pill / 锁 / 金灰星
+    load('badgeCheck', 'assets/images/badge-check.png');
+    load('badgeChallenge', 'assets/images/badge-challenge.png');
+    load('badgeLock', 'assets/images/badge-lock.png');
+    load('starGold', 'assets/images/star-gold.png');
+    load('starGray', 'assets/images/star-gray.png');
     // 加载进度条（PRD-关卡生成异步化与加载界面 F-04）：位图外框 + 果汁填充（源裁剪显示进度）
     load('loadingBarFrame', 'assets/images/loading-bar.png');
     load('loadingBarFill', 'assets/images/loading-fill.png');
@@ -162,7 +181,8 @@ export default class Renderer {
   layoutUI() {
     const W = this.W;
     // 游戏页（返回按钮与右上角胶囊垂直居中对齐）
-    this.backBtn = { x: 34, y: this.capCenterY, r: 18 };
+    // 返回钮：参考图比例 r≈23@390宽、中心 y≈54（不低于安全区）
+    this.backBtn = { x: 38, y: Math.max(this.capCenterY, 54), r: 22 };
     const btnY = this.H - 86;
     // 5 钮道具栏（PRD-限时与步数限制 F-10：+续杯）：间距压缩为 ±140/±70，r 28→27 防窄屏越界
     this.undoBtn = { x: W / 2 - 140, y: btnY, r: 27 };
@@ -178,13 +198,15 @@ export default class Renderer {
     // 失败弹窗（PRD-玩法扩展 §2 B：重开 / 广告复活，布局与暂停浮层同构）
     this.failReviveBtn = { x: W / 2 - 90, y: this.H / 2 - 44, w: 180, h: 48 };
     this.failRestartBtn = { x: W / 2 - 90, y: this.H / 2 + 24, w: 180, h: 48 };
-    // 菜单页
-    this.menuPlayBtn = { x: W / 2 - 110, y: this.H * 0.52, w: 220, h: 56 };
-    this.menuSettingsBtn = { x: W / 2 - 110, y: this.H * 0.52 + 76, w: 220, h: 56 };
+    // 菜单页（2026-10-30 对齐参考图比例：主钮 64% 宽/90 高 y=37%H，次钮 227×70 y=52%H，
+    // 宽高比与 btn-primary/btn-secondary 素材一致零拉伸）
+    this.menuPlayBtn = { x: W / 2 - 125, y: this.H * 0.37, w: 250, h: 90 };
+    // 次按钮明显小于主按钮（用户反馈：主次大小需拉开层级）
+    this.menuSettingsBtn = { x: W / 2 - 96, y: this.H * 0.519, w: 192, h: 62 };
     // 标题热区（PRD-标题图片化与渲染测试页：R2 隐藏入口 = 连续快速点 5 次进测试页）
-    // 宽度定宽、高度在 drawMenu 按素材实际宽高比回填（素材重生成无需改此处）
-    const tW = Math.min(W * 0.92, 480);
-    this.menuTitleBtn = { x: W / 2 - tW / 2, y: this.H * 0.17 - tW / 6, w: tW, h: tW / 3 };
+    // 宽度定宽、高度在 drawMenu 按素材实际宽高比回填（素材重生成无需改此处）；参考图标题宽 84%
+    const tW = Math.min(W * 0.84, 400);
+    this.menuTitleBtn = { x: W / 2 - tW / 2, y: this.H * 0.123 - tW / 6, w: tW, h: tW / 3 };
     // 测试页（瓶高/层高验证沙盒）
     this.testAddBtn = { x: W / 2 - 110, y: this.H - 148, w: 220, h: 52 };
     this.testClearBtn = { x: W / 2 - 110, y: this.H - 82, w: 220, h: 44 };
@@ -683,6 +705,62 @@ export default class Renderer {
     ctx.restore();
   }
 
+  /** 胶囊三割（九宫格退化形）：左右圆头 1:1 固定，中段横向拉伸——任意宽度圆角不变形 */
+  drawCapsule(img, x, y, w, h) {
+    const { ctx } = this;
+    const k = h / img.height;
+    const cap = (img.height / 2) * k;
+    if (w <= cap * 2) { ctx.drawImage(img, x, y, w, h); return; } // 极窄兜底整图拉伸
+    const srcCap = img.height / 2;
+    ctx.drawImage(img, 0, 0, srcCap, img.height, x, y, cap, h);
+    ctx.drawImage(img, srcCap, 0, img.width - srcCap * 2, img.height, x + cap, y, w - cap * 2, h);
+    ctx.drawImage(img, img.width - srcCap, 0, srcCap, img.height, x + w - cap, y, cap, h);
+  }
+
+  /** 九宫格：四角固定（随垂直缩放比 k 等比），四边单轴拉伸，中心双向拉伸。border 为源图像素 */
+  draw9Slice(img, x, y, w, h, border) {
+    const { ctx } = this;
+    const k = h / img.height;
+    const b = Math.min(border * k, h / 2, w / 2);
+    if (b <= 0 || w <= b * 2 || h <= b * 2) { ctx.drawImage(img, x, y, w, h); return; } // 兜底整图拉伸
+    const sb = b / k;
+    const iw = img.width, ih = img.height, mw = iw - sb * 2, mh = ih - sb * 2;
+    // 四角
+    ctx.drawImage(img, 0, 0, sb, sb, x, y, b, b);
+    ctx.drawImage(img, iw - sb, 0, sb, sb, x + w - b, y, b, b);
+    ctx.drawImage(img, 0, ih - sb, sb, sb, x, y + h - b, b, b);
+    ctx.drawImage(img, iw - sb, ih - sb, sb, sb, x + w - b, y + h - b, b, b);
+    // 四边（单轴拉伸）
+    ctx.drawImage(img, sb, 0, mw, sb, x + b, y, w - b * 2, b);
+    ctx.drawImage(img, sb, ih - sb, mw, sb, x + b, y + h - b, w - b * 2, b);
+    ctx.drawImage(img, 0, sb, sb, mh, x, y + b, b, h - b * 2);
+    ctx.drawImage(img, iw - sb, sb, sb, mh, x + w - b, y + b, b, h - b * 2);
+    // 中心（双向拉伸）
+    ctx.drawImage(img, sb, sb, mw, mh, x + b, y + b, w - b * 2, h - b * 2);
+  }
+
+  /** 弹层面板：卡片素材九宫格，目标角尺寸固定（db 逻辑像素）不随面板胀大；素材缺失降级程序化奶油面板 */
+  drawPanel(img, x, y, w, h, db = 16, sb = 22) {
+    const { ctx } = this;
+    const b = Math.min(db, h / 2, w / 2);
+    if (!img || !img.width || b <= 0 || w <= b * 2 || h <= b * 2) {
+      ctx.fillStyle = '#FFF9F0';
+      this.rr(x, y, w, h, db);
+      ctx.fill();
+      return;
+    }
+    const mw = img.width - sb * 2, mh = img.height - sb * 2;
+    ctx.drawImage(img, 0, 0, sb, sb, x, y, b, b);
+    ctx.drawImage(img, img.width - sb, 0, sb, sb, x + w - b, y, b, b);
+    ctx.drawImage(img, 0, img.height - sb, sb, sb, x, y + h - b, b, b);
+    ctx.drawImage(img, img.width - sb, img.height - sb, sb, sb, x + w - b, y + h - b, b, b);
+    ctx.drawImage(img, sb, 0, mw, sb, x + b, y, w - b * 2, b);
+    ctx.drawImage(img, sb, img.height - sb, mw, sb, x + b, y + h - b, w - b * 2, b);
+    ctx.drawImage(img, 0, sb, sb, mh, x, y + b, b, h - b * 2);
+    ctx.drawImage(img, img.width - sb, sb, sb, mh, x + w - b, y + b, b, h - b * 2);
+    ctx.drawImage(img, sb, sb, mw, mh, x + b, y + b, w - b * 2, h - b * 2);
+  }
+
   /** 通用文字按钮。style.pressed：按下态（中心缩放 0.88 + 填充加深一档，R1，圆形与矩形统一） */
   drawTextButton(btn, label, style) {
     const { ctx } = this;
@@ -694,15 +772,28 @@ export default class Renderer {
       ctx.scale(0.88, 0.88);
       ctx.translate(-cx, -cy);
     }
-    let fill = style.fill;
-    if (style.pressed) fill = fill.startsWith('#') ? this._darken(fill) : '#FBE3C4';
-    ctx.fillStyle = fill;
-    this.rr(btn.x, btn.y, btn.w, btn.h, Math.min(btn.h / 2, 24));
-    ctx.fill();
-    if (style.stroke) {
-      ctx.strokeStyle = style.stroke;
-      ctx.lineWidth = 2;
-      ctx.stroke();
+    // 位图底图优先（AI 生成 UI 资源）：按 fill 色映射主/次按钮；未就绪或其他样式降级程序化绘制
+    const imgKey = style.fill === '#FF9838' ? 'btnPrimary'
+      : style.fill === 'rgba(255,255,255,0.92)' ? 'btnSecondary' : null;
+    const img = imgKey && this.images[imgKey];
+    if (img && img.width) {
+      this.drawCapsule(img, btn.x, btn.y, btn.w, btn.h); // 胶囊三割：任意宽度圆头不变形
+      if (style.pressed) {
+        ctx.fillStyle = 'rgba(120, 78, 29, 0.12)'; // 按下加深一档（位图等价 _darken）
+        this.rr(btn.x, btn.y, btn.w, btn.h, Math.min(btn.h / 2, 24));
+        ctx.fill();
+      }
+    } else {
+      let fill = style.fill;
+      if (style.pressed) fill = fill.startsWith('#') ? this._darken(fill) : '#FBE3C4';
+      ctx.fillStyle = fill;
+      this.rr(btn.x, btn.y, btn.w, btn.h, Math.min(btn.h / 2, 24));
+      ctx.fill();
+      if (style.stroke) {
+        ctx.strokeStyle = style.stroke;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
     ctx.fillStyle = style.text;
     ctx.font = `bold ${style.size || 17}px sans-serif`;
@@ -736,20 +827,32 @@ export default class Renderer {
       ctx.arc(btn.x, btn.y, btn.r + 4 + 3 * pulse, 0, Math.PI * 2);
       ctx.stroke();
     }
-    let fill = opts.fill || 'rgba(255,255,255,0.92)';
-    if (opts.active) fill = '#FFEFD9'; // 微暖填充（色板既有色）
-    if (opts.pressed) fill = fill.startsWith('#') ? this._darken(fill) : '#FBE3C4'; // 按下加深一档
-    ctx.fillStyle = fill;
-    ctx.beginPath();
-    ctx.arc(btn.x, btn.y, btn.r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = opts.active ? '#E07B2A' : opts.stroke || '#E8C9A0';
-    ctx.lineWidth = opts.active ? 3 : 2;
-    ctx.stroke();
+    // 位图底图优先（AI 生成 UI 资源）；active 生效态与素材未就绪时降级程序化绘制
+    const backImg = !opts.active && this.images.btnBack;
+    if (backImg && backImg.width) {
+      ctx.drawImage(backImg, btn.x - btn.r, btn.y - btn.r, btn.r * 2, btn.r * 2);
+      if (opts.pressed) {
+        ctx.fillStyle = 'rgba(120, 78, 29, 0.12)'; // 按下加深一档（位图等价 _darken）
+        ctx.beginPath();
+        ctx.arc(btn.x, btn.y, btn.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else {
+      let fill = opts.fill || 'rgba(255,255,255,0.92)';
+      if (opts.active) fill = '#FFEFD9'; // 微暖填充（色板既有色）
+      if (opts.pressed) fill = fill.startsWith('#') ? this._darken(fill) : '#FBE3C4'; // 按下加深一档
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.arc(btn.x, btn.y, btn.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = opts.active ? '#E07B2A' : opts.stroke || '#E8C9A0';
+      ctx.lineWidth = opts.active ? 3 : 2;
+      ctx.stroke();
+    }
     const icon = opts.icon && this.images[opts.icon];
     if (icon) {
-      // 图标占按钮直径的 70%
-      const d = btn.r * 1.4;
+      // 图标占按钮直径的比例（opts.iconScale 可覆盖，默认 70%）
+      const d = btn.r * (opts.iconScale || 1.4);
       ctx.drawImage(icon, btn.x - d / 2, btn.y - d / 2, d, d);
       ctx.restore();
       return;
@@ -786,24 +889,25 @@ export default class Renderer {
     ctx.fillStyle = '#7A5C3E';
     ctx.fillText('JuiceSort · 倒水排序', this.W / 2, tb.y + tb.h + 26);
 
-    // 开始 / 设置按钮
+    // 开始 / 设置按钮（参考图字号：主钮 22 / 次钮 18）
     const playLabel = state.hasProgress ? '继续闯关' : '开始游戏';
     this.drawTextButton(this.menuPlayBtn, playLabel, {
       fill: '#FF9838',
       text: '#FFFFFF',
-      size: 19,
+      size: 28,
       pressed: this.pressed === 'menuPlayBtn',
     });
     this.drawTextButton(this.menuSettingsBtn, '设置', {
       fill: 'rgba(255,255,255,0.92)',
       stroke: '#E8C9A0',
       text: '#8A6234',
+      size: 18,
       pressed: this.pressed === 'menuSettingsBtn',
     });
 
-    ctx.font = 'bold 12px sans-serif';
+    ctx.font = 'bold 13px sans-serif';
     ctx.fillStyle = '#8A6234';
-    ctx.fillText(`已通关 ${state.cleared} / ${this.levelCount} 关`, this.W / 2, this.menuSettingsBtn.y + 110);
+    ctx.fillText(`已通关 ${state.cleared} / ${this.levelCount} 关`, this.W / 2, this.menuSettingsBtn.y + 104);
   }
 
   // ---------- 测试页（隐藏入口进入，PRD-标题图片化与渲染测试页 R3） ----------
@@ -819,7 +923,7 @@ export default class Renderer {
     const caps = state.testCaps;
     const layersArr = state.testLayers;
     if (!caps) return;
-    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', pressed: this.pressed === 'backBtn' });
+    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', iconScale: 0.85, pressed: this.pressed === 'backBtn' });
     ctx.textAlign = 'center';
     ctx.fillStyle = '#8A5A22';
     ctx.font = 'bold 18px sans-serif';
@@ -859,7 +963,7 @@ export default class Renderer {
 
   drawSettings(state) {
     const { ctx } = this;
-    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', pressed: this.pressed === 'backBtn' });
+    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', iconScale: 0.85, pressed: this.pressed === 'backBtn' });
     ctx.textAlign = 'center';
     ctx.fillStyle = '#8A5A22';
     ctx.font = 'bold 28px sans-serif';
@@ -921,49 +1025,69 @@ export default class Renderer {
 
   drawLevelSelect(state) {
     const { ctx } = this;
-    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', pressed: this.pressed === 'backBtn' });
+    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', iconScale: 0.85, pressed: this.pressed === 'backBtn' });
     ctx.textAlign = 'center';
     ctx.fillStyle = '#8A5A22';
-    ctx.font = 'bold 26px sans-serif';
-    ctx.fillText('选择关卡', this.W / 2, this.H * 0.09);
-    ctx.font = 'bold 13px sans-serif';
+    ctx.font = 'bold 34px sans-serif'; // 参考图标题字高 ~34@390宽
+    ctx.strokeStyle = 'rgba(255, 249, 240, 0.9)'; // 奶油光晕：压旗背景时保可读
+    ctx.lineWidth = 5;
+    ctx.lineJoin = 'round';
+    ctx.strokeText('选择关卡', this.W / 2, this.H * 0.165);
+    ctx.fillText('选择关卡', this.W / 2, this.H * 0.165);
+    ctx.font = 'bold 15px sans-serif';
     ctx.fillStyle = '#8A6234';
-    ctx.fillText(`已通关 ${state.cleared} / ${this.levelCount} 关 · 通关解锁下一关`, this.W / 2, this.H * 0.09 + 26);
-    // 道具背包数量（PRD-道具背包 + 续杯 F-10）：图标 + 数量行（图标辅助识别，不再纯文字）
+    ctx.strokeStyle = 'rgba(255, 249, 240, 0.85)'; // 奶油光晕：抗背景挂饰干扰
+    ctx.lineWidth = 4;
+    ctx.strokeText('用一杯果汁，点亮每一天！', this.W / 2, this.H * 0.165 + 33);
+    ctx.fillText('用一杯果汁，点亮每一天！', this.W / 2, this.H * 0.165 + 33);
+    // 道具背包数量（PRD-道具背包 + 续杯 F-10）：图标 + 数量行（图标 24px，行位 26%H，参考图比例）
     const inv = state.inv || { undo: 0, shuffle: 0, addBottle: 0, revive: 0 };
     const items = [
-      ['iconUndo', inv.undo],
-      ['iconShuffle', inv.shuffle],
-      ['iconAdd', inv.addBottle],
-      ['iconRevive', inv.revive || 0],
+      ['itUndo', inv.undo],
+      ['itShuffle', inv.shuffle],
+      ['itAdd', inv.addBottle],
+      ['itRevive', inv.revive || 0],
     ];
-    const slotGap = 82;
+    const slotGap = 78;
     const rowW = (items.length - 1) * slotGap;
-    const iy = this.H * 0.09 + 46;
+    const iy = this.H * 0.245;
     items.forEach(([key, count], i) => {
       const x = this.W / 2 - rowW / 2 + i * slotGap;
       const icon = this.images[key]; // 图标未加载完成时降级为纯文字
-      if (icon) ctx.drawImage(icon, x - 24, iy - 9, 18, 18);
-      ctx.font = 'bold 13px sans-serif';
+      if (icon) {
+        const s = 26; // 等比 contain：高 26 上限
+        const ar = icon.width / icon.height;
+        const dw = ar >= 1 ? s : s * ar;
+        const dh = ar >= 1 ? s / ar : s;
+        ctx.drawImage(icon, x - 6 - dw, iy - dh / 2, dw, dh);
+      }
+      ctx.font = 'bold 14px sans-serif';
       ctx.fillStyle = '#7A5C3E';
       ctx.textAlign = 'left';
-      ctx.fillText(`×${count}`, x - 2, iy + 5);
+      ctx.fillText(`×${count}`, x - 2, iy + 6);
     });
     ctx.textAlign = 'center';
 
-    // 自适应列数（Q6=A）：宽屏 4 列，窄屏 3 列；30 关竖向滚动
+    // 自适应列数（Q6=A）：宽屏 4 列，窄屏 3 列；100 关竖向滚动
+    // 卡片 104×82、边距 24 / 列距 16 / 行距 16、格顶 27%H（2026-10-30 对齐参考图比例）
     const cols = this.W >= 414 ? 4 : 3;
-    const margin = 20;
-    const gapX = 12;
-    const gapY = 14;
+    const margin = 24;
+    const gapX = 16;
+    const gapY = 16;
     const cardW = (this.W - margin * 2 - (cols - 1) * gapX) / cols;
-    const cardH = 62;
+    const cardH = 86;
     const rows = Math.ceil(this.levelCount / cols);
-    const gridTop = this.H * 0.09 + 70;
+    const gridTop = this.H * 0.285;
     const availH = this.H - 60 - gridTop;
     const contentH = rows * cardH + (rows - 1) * gapY;
     this.levelScrollMax = Math.max(0, contentH - availH);
     this.levelScroll = Math.max(0, Math.min(this.levelScroll, this.levelScrollMax));
+
+    // 裁剪区：滚动后卡片不得越入标题/道具行（真机反馈：长列表下滚卡片盖住道具行）
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, gridTop - 2, this.W, this.H - gridTop + 2);
+    ctx.clip();
 
     this.levelBtns = [];
     for (let i = 0; i < this.levelCount; i++) {
@@ -982,7 +1106,7 @@ export default class Renderer {
       const unlocked = i <= state.cleared; // 已解锁（含当前待挑战）
       const cardPressed = this.pressed === 'level:' + i; // 卡片按下态（R1）
 
-      // 卡片（按下态：中心缩放 0.88，白底加深一档）
+      // 卡片（按下态：中心缩放 0.88，白底加深一档）；位图底图优先（AI 生成 UI 资源），未就绪降级程序化绘制
       ctx.save();
       if (cardPressed) {
         const ccx = x + cardW / 2;
@@ -991,54 +1115,87 @@ export default class Renderer {
         ctx.scale(0.88, 0.88);
         ctx.translate(-ccx, -ccy);
       }
-      ctx.fillStyle = !unlocked
-        ? 'rgba(210,195,170,0.35)'
-        : cleared
-          ? 'rgba(139,212,80,0.16)'
-          : cardPressed
-            ? '#FBE3C4'
-            : 'rgba(255,255,255,0.92)';
-      this.rr(x, y, cardW, cardH, 12);
-      ctx.fill();
-      ctx.strokeStyle = !unlocked ? 'rgba(176,158,130,0.35)' : cleared ? '#8BD450' : '#E8C9A0';
-      ctx.lineWidth = cleared ? 2.5 : 2;
-      ctx.stroke();
+      const cardImg = this.images[!unlocked ? 'cardLocked' : cleared ? 'cardCleared' : 'cardNormal'];
+      if (cardImg && cardImg.width) {
+        this.draw9Slice(cardImg, x, y, cardW, cardH, 34); // 九宫格：角区 34(≥圆角30+描边4@2x)，中心平涂拉伸
+        if (cardPressed) {
+          ctx.fillStyle = 'rgba(120, 78, 29, 0.10)'; // 按下加深一档（位图等价）
+          this.rr(x, y, cardW, cardH, 16);
+          ctx.fill();
+        }
+      } else {
+        ctx.fillStyle = !unlocked
+          ? 'rgba(210,195,170,0.35)'
+          : cleared
+            ? 'rgba(139,212,80,0.16)'
+            : cardPressed
+              ? '#FBE3C4'
+              : 'rgba(255,255,255,0.92)';
+        this.rr(x, y, cardW, cardH, 16);
+        ctx.fill();
+        ctx.strokeStyle = !unlocked ? 'rgba(176,158,130,0.35)' : cleared ? '#8BD450' : '#E8C9A0';
+        ctx.lineWidth = cleared ? 2.5 : 2;
+        ctx.stroke();
+      }
 
-      // 关卡号（左）+ 状态标识（右，窄卡片用紧凑标识）
-      ctx.textBaseline = 'middle';
+      // 关卡号（左上，设计稿样式大数字）+ 右上角状态徽章（位图优先，降级文字）
+      ctx.textBaseline = 'alphabetic';
       ctx.textAlign = 'left';
       ctx.fillStyle = !unlocked ? 'rgba(150,132,106,0.6)' : cleared ? '#4E8A2A' : '#8A6234';
-      ctx.font = 'bold 21px sans-serif';
-      ctx.fillText(String(i + 1), x + 14, y + cardH / 2);
-      ctx.textAlign = 'right';
-      if (!unlocked) {
-        this.drawLock(x + cardW - 24, y + cardH / 2);
-      } else if (cleared) {
-        ctx.fillStyle = '#4E8A2A';
-        ctx.font = 'bold 17px sans-serif';
-        ctx.fillText('✓', x + cardW - 14, y + cardH / 2);
-      } else if (state.specials && state.specials[i]) {
+      ctx.font = 'bold 24px sans-serif';
+      ctx.fillText(String(i + 1), x + 13, y + 40);
+      const chkImg = this.images.badgeCheck, chlImg = this.images.badgeChallenge, plkImg = this.images.badgeLock;
+      if (unlocked && !cleared && (state.specials && state.specials[i])) {
         // 特殊关静态角标（R7/S-09）：未通关的特殊关显示「特殊」，已通关仍为 ✓
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'right';
         ctx.fillStyle = '#5B8DEF';
-        ctx.font = 'bold 12px sans-serif';
-        ctx.fillText('特殊', x + cardW - 12, y + cardH / 2);
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText('特殊', x + cardW - 12, y + 27);
+        ctx.textBaseline = 'alphabetic';
+      } else if (!unlocked && plkImg && plkImg.width) {
+        ctx.drawImage(plkImg, x + cardW - 36, y + 12, 22, 27);
+      } else if (cleared && chkImg && chkImg.width) {
+        ctx.drawImage(chkImg, x + cardW - 41, y + 12, 28, 28);
+      } else if (unlocked && chlImg && chlImg.width) {
+        ctx.drawImage(chlImg, x + cardW - 58, y + 13, 47, 27);
       } else {
-        ctx.fillStyle = '#E07B2A';
-        ctx.font = 'bold 12px sans-serif';
-        ctx.fillText('挑战', x + cardW - 12, y + cardH / 2);
+        // 降级：文字标识（右中）
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'right';
+        if (!unlocked) {
+          this.drawLock(x + cardW - 24, y + cardH / 2);
+        } else if (cleared) {
+          ctx.fillStyle = '#4E8A2A';
+          ctx.font = 'bold 17px sans-serif';
+          ctx.fillText('✓', x + cardW - 14, y + cardH / 2);
+        } else {
+          ctx.fillStyle = '#E07B2A';
+          ctx.font = 'bold 12px sans-serif';
+          ctx.fillText('挑战', x + cardW - 12, y + cardH / 2);
+        }
+        ctx.textBaseline = 'alphabetic';
       }
-      // 已获星数（PRD-三星评价；纯文本，只读 state.best，锁定卡与无纪录卡不显示）
-      // 有机制角标时星数移至右下角，为角标行让位（PRD-选关机制角标 §3）
+      // 三星常显（设计稿样式）：金星=已获星数（PRD-三星评价，只读 state.best），其余灰星
       const rec = state.best && state.best[i + 1];
       const tags = (state.mechs && state.mechs[i]) || [];
-      if (unlocked && rec && rec.stars) {
-        ctx.textAlign = tags.length ? 'right' : 'center';
-        ctx.fillStyle = '#F5A623';
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillText('★'.repeat(rec.stars) + '☆'.repeat(3 - rec.stars), tags.length ? x + cardW - 10 : x + cardW / 2, y + cardH - 8);
-        ctx.textAlign = 'right';
+      const earned = unlocked && rec && rec.stars ? rec.stars : 0;
+      const sS = 18, sGap = 3;
+      const starsW = 3 * sS + 2 * sGap;
+      const sx = x + cardW / 2 - starsW / 2;
+      const sy = y + cardH - 27;
+      for (let s = 0; s < 3; s++) {
+        const simg = this.images[s < earned ? 'starGold' : 'starGray'];
+        if (simg && simg.width) {
+          ctx.drawImage(simg, sx + s * (sS + sGap), sy, sS, sS);
+        } else {
+          ctx.textAlign = 'left';
+          ctx.fillStyle = s < earned ? '#F5A623' : 'rgba(180,175,168,0.9)';
+          ctx.font = `bold ${sS - 4}px sans-serif`;
+          ctx.fillText('★', sx + s * (sS + sGap), sy + sS - 3);
+        }
       }
-      // 机制角标（PRD-选关机制角标 §2/§3）：底部左侧小圆角色块 + 白字，最多 3 个 + 「+N」
+      // 机制角标（PRD-选关机制角标 §2/§3）：数字下方小圆角色块 + 白字，最多 3 个 + 「+N」
       if (tags.length) {
         const shown = tags.slice(0, MECH_TAG_MAX);
         const extra = tags.length - shown.length;
@@ -1046,7 +1203,7 @@ export default class Renderer {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         let tx = x + 10;
-        const cy = y + cardH - 13;
+        const cy = y + 52;
         const drawChip = (label, color) => {
           const w = label.length * 9 + 6; // 9px 字号下 CJK 字宽 ≈ 9（不用 measureText，兼容测试桩）
           ctx.fillStyle = !unlocked ? 'rgba(176,158,130,0.6)' : color;
@@ -1063,6 +1220,7 @@ export default class Renderer {
       ctx.textBaseline = 'alphabetic';
       ctx.restore(); // 卡片按下态变换收束
     }
+    ctx.restore(); // 网格裁剪收束
 
     // 滚动位置指示（内容超出时可滚动时显示细滚动条）
     if (this.levelScrollMax > 0) {
@@ -1101,6 +1259,12 @@ export default class Renderer {
     ctx.save();
     ctx.fillStyle = 'rgba(43, 28, 12, 0.5)';
     ctx.fillRect(0, 0, this.W, this.H);
+    // 果汁卡片风面板（九宫格）+ 标题
+    this.drawPanel(this.images.cardNormal, this.W / 2 - 150, this.H / 2 - 96, 300, 204);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#8A5A22';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.fillText('暂停中', this.W / 2, this.H / 2 - 60);
     this.drawTextButton(this.pauseResumeBtn, '继续游戏', {
       fill: '#FF9838',
       text: '#FFFFFF',
@@ -1125,13 +1289,15 @@ export default class Renderer {
     ctx.save();
     ctx.fillStyle = 'rgba(43, 28, 12, 0.5)';
     ctx.fillRect(0, 0, this.W, this.H);
-    // 标题与说明
+    // 果汁卡片风面板（九宫格）
+    this.drawPanel(this.images.cardNormal, this.W / 2 - 150, this.H / 2 - 124, 300, 196);
+    // 标题与说明（面板上改用棕色系）
     ctx.textAlign = 'center';
-    ctx.fillStyle = '#FFF6E8';
+    ctx.fillStyle = '#8A5A22';
     ctx.font = 'bold 20px sans-serif';
     ctx.fillText(`补充${label}道具`, this.W / 2, this.H / 2 - 96);
     ctx.font = 'bold 14px sans-serif';
-    ctx.fillStyle = 'rgba(255,246,232,0.85)';
+    ctx.fillStyle = '#7A5C3E';
     ctx.fillText(`观看一段视频广告，补充 1 次「${label}」`, this.W / 2, this.H / 2 - 66);
     this.drawTextButton(this.adConfirmWatchBtn, '看广告 · 补充', {
       fill: '#FF9838',
@@ -1161,9 +1327,7 @@ export default class Renderer {
     const ch = 366;
     const cx = (this.W - cw) / 2;
     const cy = (this.H - ch) / 2 - 40;
-    ctx.fillStyle = '#FFF9F0';
-    this.rr(cx, cy, cw, ch, 18);
-    ctx.fill();
+    this.drawPanel(this.images.cardNormal, cx, cy, cw, ch);
 
     // 标题
     ctx.textAlign = 'center';
@@ -1260,7 +1424,7 @@ export default class Renderer {
   drawTopBar(state) {
     const { ctx } = this;
     const logic = state.logic;
-    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', pressed: this.pressed === 'backBtn' });
+    this.drawCircleButton(this.backBtn, '←', { icon: 'iconBack', iconScale: 0.85, pressed: this.pressed === 'backBtn' });
     ctx.textBaseline = 'middle';
     // 顶栏文字：奶油色填充 + 深棕描边（游戏经典描边字），任何背景上都清晰
     ctx.save();
@@ -1888,9 +2052,7 @@ export default class Renderer {
     const ch = 236;
     const cx = (this.W - cw) / 2;
     const cy = (this.H - ch) / 2 - 30;
-    ctx.fillStyle = '#FFF9F0';
-    this.rr(cx, cy, cw, ch, 18);
-    ctx.fill();
+    this.drawPanel(this.images.cardNormal, cx, cy, cw, ch);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#B22218';
     ctx.font = 'bold 24px sans-serif';
