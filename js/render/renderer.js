@@ -104,6 +104,7 @@ export default class Renderer {
     load('btnPrimary', 'assets/images/btn-primary.png');
     load('btnSecondary', 'assets/images/btn-secondary.png');
     load('btnBack', 'assets/images/btn-back.png');
+    load('panel', 'assets/images/panel.png'); // 浮层面板底图（合成奶油卡，无红环；勿用 cardNormal——其带挑战红环）
     load('cardCleared', 'assets/images/card-cleared.png');
     load('cardNormal', 'assets/images/card-normal.png');
     load('cardLocked', 'assets/images/card-locked.png');
@@ -1158,7 +1159,7 @@ export default class Renderer {
       } else if (cleared && chkImg && chkImg.width) {
         ctx.drawImage(chkImg, x + cardW - 41, y + 12, 28, 28);
       } else if (unlocked && chlImg && chlImg.width) {
-        ctx.drawImage(chlImg, x + cardW - 58, y + 13, 47, 27);
+        ctx.drawImage(chlImg, x + cardW - 56, y + 18, 43, 17); // 设计稿 pill 原比例 2.26:1
       } else {
         // 降级：文字标识（右中）
         ctx.textBaseline = 'middle';
@@ -1260,7 +1261,7 @@ export default class Renderer {
     ctx.fillStyle = 'rgba(43, 28, 12, 0.5)';
     ctx.fillRect(0, 0, this.W, this.H);
     // 果汁卡片风面板（九宫格）+ 标题
-    this.drawPanel(this.images.cardNormal, this.W / 2 - 150, this.H / 2 - 96, 300, 204);
+    this.drawPanel(this.images.panel, this.W / 2 - 150, this.H / 2 - 96, 300, 204);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#8A5A22';
     ctx.font = 'bold 22px sans-serif';
@@ -1290,7 +1291,7 @@ export default class Renderer {
     ctx.fillStyle = 'rgba(43, 28, 12, 0.5)';
     ctx.fillRect(0, 0, this.W, this.H);
     // 果汁卡片风面板（九宫格）
-    this.drawPanel(this.images.cardNormal, this.W / 2 - 150, this.H / 2 - 124, 300, 196);
+    this.drawPanel(this.images.panel, this.W / 2 - 150, this.H / 2 - 124, 300, 196);
     // 标题与说明（面板上改用棕色系）
     ctx.textAlign = 'center';
     ctx.fillStyle = '#8A5A22';
@@ -1327,7 +1328,7 @@ export default class Renderer {
     const ch = 366;
     const cx = (this.W - cw) / 2;
     const cy = (this.H - ch) / 2 - 40;
-    this.drawPanel(this.images.cardNormal, cx, cy, cw, ch);
+    this.drawPanel(this.images.panel, cx, cy, cw, ch);
 
     // 标题
     ctx.textAlign = 'center';
@@ -2052,7 +2053,7 @@ export default class Renderer {
     const ch = 236;
     const cx = (this.W - cw) / 2;
     const cy = (this.H - ch) / 2 - 30;
-    this.drawPanel(this.images.cardNormal, cx, cy, cw, ch);
+    this.drawPanel(this.images.panel, cx, cy, cw, ch);
     ctx.textAlign = 'center';
     ctx.fillStyle = '#B22218';
     ctx.font = 'bold 24px sans-serif';
