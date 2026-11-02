@@ -855,9 +855,12 @@ export default class Renderer {
     }
     const icon = opts.icon && this.images[opts.icon];
     if (icon) {
-      // 图标占按钮直径的比例（opts.iconScale 可覆盖，默认 70%）
+      // 图标占按钮直径的比例（opts.iconScale 可覆盖，默认 70%）；contain 等比：长边对齐 d，不拉伸变形
       const d = btn.r * (opts.iconScale || 1.4);
-      ctx.drawImage(icon, btn.x - d / 2, btn.y - d / 2, d, d);
+      const ar = icon.width / icon.height;
+      const dw = ar >= 1 ? d : d * ar;
+      const dh = ar >= 1 ? d / ar : d;
+      ctx.drawImage(icon, btn.x - dw / 2, btn.y - dh / 2, dw, dh);
       ctx.restore();
       return;
     }
