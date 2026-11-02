@@ -49,6 +49,7 @@ const webAudioStub = {
   createBuffer: () => ({ getChannelData: () => new Float32Array(100) }),
 };
 
+const storageMap = new Map(); // 存储桩（Map 兜底：音量持久化等落盘断言用，未写入的 key 返回 ''）
 globalThis.wx = {
   createCanvas: () => canvasStub,
   getSystemInfoSync: () => ({ screenWidth: 375, screenHeight: 812, pixelRatio: 2 }),
@@ -64,9 +65,13 @@ globalThis.wx = {
   onTouchCancel: (fn) => {
     globalThis.__tc = fn;
   },
-  setStorageSync: noop,
-  getStorageSync: () => '',
-  removeStorageSync: noop,
+  setStorageSync: (k, v) => {
+    storageMap.set(k, v);
+  },
+  getStorageSync: (k) => (storageMap.has(k) ? storageMap.get(k) : ''),
+  removeStorageSync: (k) => {
+    storageMap.delete(k);
+  },
   createWebAudioContext: () => webAudioStub,
   // 胶囊按钮位置（顶部安全区计算用）
   getMenuButtonBoundingClientRect: () => ({
@@ -782,15 +787,7 @@ check('退出 → 返回开始菜单（进度保留）→ 设置 → 重置进�
   // 设置页
   tap(renderer.menuSettingsBtn.x + 5, renderer.menuSettingsBtn.y + 5);
   assert.strictEqual(main.scene, 'settings');
-  main.tick(); // 设置页绘制不抛错
-
-  // 音效开关切换（默认开 → 关 → 开）
-  assert.strictEqual(main.soundOn, true);
-  tap(renderer.settingsSoundToggle.x + 5, renderer.settingsSoundToggle.y + 5);
-  assert.strictEqual(main.soundOn, false);
-  main.tick(); // 绘制开关状态不抛错
-  tap(renderer.settingsSoundToggle.x + 5, renderer.settingsSoundToggle.y + 5);
-  assert.strictEqual(main.soundOn, true);
+  main.tick(); // 设置页（音量滑条行，无总开关）绘制不抛错
 
   tap(renderer.settingsResetBtn.x + 5, renderer.settingsResetBtn.y + 5);
   assert.strictEqual(main.cleared, 0, '重置后解锁进度应为 0');
@@ -807,6 +804,43 @@ check('退出 → 返回开始菜单（进度保留）→ 设置 → 重置进�
   assert.strictEqual(main.levelIndex, 0);
   assert.strictEqual(main.cleared, 0, '重置后解锁进度应为 0');
   assert.strictEqual(logic.moveCount, 0);
+});
+
+check('设置页音量滑条：默认值、点击定位、拖动实时调音量、抬手落盘（PRD-设置页音量调节）', () => {
+  // 默认值（构造时无存档）：音效 100% / 音乐 40%
+  assert.strictEqual(main.sfxVol, 1, '默认音效音量应为 100%');
+  assert.strictEqual(main.bgmVol, 0.4, '默认音乐音量应为 40%');
+  main.scene = 'settings';
+  main.tick(); // 含滑条的设置页绘制不抛错
+
+  // 点击音效滑条 25% 处 → 音量 0.25 且立即落盘
+  const s = renderer.settingsSfxSlider;
+  tap(s.x + s.w * 0.25, s.y + s.h / 2);
+  assert.ok(Math.abs(main.sfxVol - 0.25) < 1e-9, '点击音效滑条应定位 25%');
+  assert.deepStrictEqual(storageMap.get('juicesort_volume'), { sfx: 0.25, bgm: 0.4 }, '抬手应落盘');
+
+  // 拖动音乐滑条左端 → 右端：实时生效（audio 模块），抬手落盘
+  const b = renderer.settingsBgmSlider;
+  const y = b.y + b.h / 2;
+  globalThis.__ts({ touches: [{ clientX: b.x + 2, clientY: y }] });
+  globalThis.__tm({ touches: [{ clientX: b.x + b.w * 0.5, clientY: y }] });
+  globalThis.__tm({ touches: [{ clientX: b.x + b.w, clientY: y }] });
+  globalThis.__te({ changedTouches: [{ clientX: b.x + b.w, clientY: y }] });
+  assert.strictEqual(main.bgmVol, 1, '音乐滑条拖到最右应为 100%');
+  assert.strictEqual(main.audio.bgmVol, 1, '音量应实时应用到音频模块');
+  assert.deepStrictEqual(storageMap.get('juicesort_volume'), { sfx: 0.25, bgm: 1 }, '拖动抬手应落盘');
+
+  // 越界裁剪：越界 x 钳到 0~1（拉到 0 即静音口径）
+  main._applySliderValue('sfx', s.x + s.w + 999);
+  assert.strictEqual(main.sfxVol, 1, '越界 x 应钳到 100%');
+  main._applySliderValue('sfx', s.x - 999);
+  assert.strictEqual(main.sfxVol, 0, '越界 x 应钳到 0%');
+
+  // 音量 0 静音口径：音频模块接受 0
+  main.audio.setVolumes(0, 0);
+  assert.strictEqual(main.audio.sfxVol, 0);
+  assert.strictEqual(main.audio.bgmVol, 0);
+  main.audio.setVolumes(0.25, 1); // 恢复现场
 });
 
 check('设置页兑换码输入：unlock_all 解锁全部关卡、无效码提示、重置可恢复', () => {
@@ -1071,7 +1105,8 @@ check('P-02/S-02：hitButton/onTap 命中矩阵 —— 4 场景 × 浮层开关�
   main.scene = 'settings';
   main.tick();
   shouldHit('settings', renderer.backBtn, 'backBtn');
-  shouldHit('settings', renderer.settingsSoundToggle, 'settingsSoundToggle');
+  shouldHit('settings', renderer.settingsSfxSlider, 'settingsSfxSlider');
+  shouldHit('settings', renderer.settingsBgmSlider, 'settingsBgmSlider');
   shouldHit('settings', renderer.settingsResetBtn, 'settingsResetBtn');
   shouldHit('settings', renderer.settingsKeyBtn, 'settingsKeyBtn');
 

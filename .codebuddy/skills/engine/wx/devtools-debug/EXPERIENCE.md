@@ -1,7 +1,7 @@
 # 踩坑经验总结（EXPERIENCE.md）
 
 > 调试微信开发者工具过程中实测踩过的坑与解法。每次调试有新发现，**按日期追加**到对应章节。
-> 最后更新：2026-10-27
+> 最后更新：2026-11-02
 
 ## 目录
 - [automator 通道（9420）](#automator-通道9420)
@@ -57,6 +57,13 @@ Nightly v2.01 与稳定版 2.02.2608080 均复现。
   （此前只在「未附加」时 attach，死会话永远不被清理）
 
 ## MCP 通道（服务端口）
+
+### 2026-11-02 追加：IDE 重启后 MCP 授权失效
+- **症状**：IDE 经 `cli.bat quit` → 带 `--inspect=9229` 重启后，`wxmcp.mjs` 任意调用报
+  `Cannot read properties of undefined (reading 'winId')`（内部 initialize 静默失败）
+- **根因**：MCP 授权绑定 IDE 会话，重启后需重新授权
+- **解法**：在开发者工具界面重新确认 MCP 授权（设置→安全→服务端口/MCP）；期间可先用
+  wx.mjs（9229 CDP 通道，IDE 重启后即恢复可用，不受此影响）
 
 ### 配置两大坑
 1. **`wechatide` 不在 PATH**：官方"复制 MCP 配置"给的 `command: "wechatide"` 无法解析（ENOENT）

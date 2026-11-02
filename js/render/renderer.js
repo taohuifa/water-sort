@@ -212,7 +212,9 @@ export default class Renderer {
     this.testAddBtn = { x: W / 2 - 110, y: this.H - 148, w: 220, h: 52 };
     this.testClearBtn = { x: W / 2 - 110, y: this.H - 82, w: 220, h: 44 };
     // 设置页
-    this.settingsSoundToggle = { x: W / 2 + 30, y: this.H * 0.29, w: 52, h: 30 }; // 音效开关
+    // 音量滑条（PRD-设置页音量调节，总开关已移除、音量 0 即关闭）：热区含拖动余量，滑条轨道绘制在热区内
+    this.settingsSfxSlider = { x: W / 2 - 14, y: this.H * 0.29, w: 130, h: 32 };
+    this.settingsBgmSlider = { x: W / 2 - 14, y: this.H * 0.35, w: 130, h: 32 };
     this.settingsResetBtn = { x: W / 2 - 110, y: this.H * 0.42, w: 220, h: 56 };
     this.settingsKeyBtn = { x: W / 2 - 110, y: this.H * 0.42 + 80, w: 220, h: 48 }; // 兑换码输入（GM 指令）
     // 广告补给确认浮层
@@ -532,7 +534,8 @@ export default class Renderer {
     }
     if (scene === 'settings') {
       if (this.inCircle(px, py, this.backBtn)) return 'backBtn';
-      if (this.inRect(px, py, this.settingsSoundToggle)) return 'settingsSoundToggle';
+      if (this.inRect(px, py, this.settingsSfxSlider)) return 'settingsSfxSlider';
+      if (this.inRect(px, py, this.settingsBgmSlider)) return 'settingsBgmSlider';
       if (this.inRect(px, py, this.settingsResetBtn)) return 'settingsResetBtn';
       if (this.inRect(px, py, this.settingsKeyBtn)) return 'settingsKeyBtn';
       return null;
@@ -970,12 +973,14 @@ export default class Renderer {
     ctx.font = 'bold 28px sans-serif';
     ctx.fillText('设置', this.W / 2, this.H * 0.2);
 
-    // 音效开关行
+    // 音量滑条行（PRD-设置页音量调节）：标签 + 滑条 + 百分比；音量 0 即关闭（无独立总开关）
     ctx.textAlign = 'left';
     ctx.fillStyle = '#7A5C3E';
     ctx.font = 'bold 17px sans-serif';
-    ctx.fillText('游戏音效', this.W / 2 - 110, this.settingsSoundToggle.y + 21);
-    this.drawToggle(this.settingsSoundToggle, state.soundOn !== false, this.pressed === 'settingsSoundToggle');
+    ctx.fillText('音效音量', this.W / 2 - 110, this.settingsSfxSlider.y + 21);
+    this.drawSlider(this.settingsSfxSlider, state.sfxVol ?? 1, this.pressed === 'settingsSfxSlider');
+    ctx.fillText('音乐音量', this.W / 2 - 110, this.settingsBgmSlider.y + 21);
+    this.drawSlider(this.settingsBgmSlider, state.bgmVol ?? 0.4, this.pressed === 'settingsBgmSlider');
 
     this.drawTextButton(this.settingsResetBtn, '重置关卡进度', {
       fill: '#E5533D',
@@ -998,27 +1003,39 @@ export default class Renderer {
     ctx.fillText('清除存档进度，从第 1 关重新开始', this.W / 2, this.H - 74);
   }
 
-  /** iOS 风格开关。pressed：按下态（中心缩放 0.88，R1） */
-  drawToggle(t, on, pressed = false) {
+  /** 水平滑条（PRD-设置页音量调节）。value 0~1，轨道横贯热区宽度（main 按同口径换算 x→value）。 */
+  drawSlider(r, value, pressed = false) {
     const { ctx } = this;
     ctx.save();
     if (pressed) {
-      const cx = t.x + t.w / 2;
-      const cy = t.y + t.h / 2;
+      const cx = r.x + r.w / 2;
+      const cy = r.y + r.h / 2;
       ctx.translate(cx, cy);
-      ctx.scale(0.88, 0.88);
+      ctx.scale(0.97, 0.97);
       ctx.translate(-cx, -cy);
     }
+    const v = Math.min(1, Math.max(0, value));
+    const cy = r.y + r.h / 2;
+    const trackH = 10;
     // 轨道
-    ctx.fillStyle = on ? '#8BD450' : '#D8C9B2';
-    this.rr(t.x, t.y, t.w, t.h, t.h / 2);
+    ctx.fillStyle = '#D8C9B2';
+    this.rr(r.x, cy - trackH / 2, r.w, trackH, trackH / 2);
     ctx.fill();
-    // 圆点
-    const cx = on ? t.x + t.w - t.h / 2 : t.x + t.h / 2;
+    // 已填充段（音量 0 时省略）
+    if (v > 0) {
+      ctx.fillStyle = '#8BD450';
+      this.rr(r.x, cy - trackH / 2, Math.max(trackH, r.w * v), trackH, trackH / 2);
+      ctx.fill();
+    }
+    // 滑块
+    const kx = r.x + r.w * v;
     ctx.fillStyle = '#FFFFFF';
     ctx.beginPath();
-    ctx.arc(cx, t.y + t.h / 2, t.h / 2 - 3, 0, Math.PI * 2);
+    ctx.arc(kx, cy, 11, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = '#C9B08A';
+    ctx.lineWidth = 2;
+    ctx.stroke();
     ctx.restore();
   }
 

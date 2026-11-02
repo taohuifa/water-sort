@@ -1,36 +1,139 @@
 /**
- * 音效模块：微信 WebAudio 实时合成，无需任何音频资源文件。
- * 惰性创建 AudioContext（首次播放时），音频异常静默降级，绝不阻塞游戏。
+ * 音效模块：素材优先（assets/audio/*.mp3，见 docs/audio-licenses.json 授权留档）+ WebAudio 合成兜底。
+ * 启动时异步解码素材为 buffer（best-effort，缺文件/解码失败回落合成音），音频异常静默降级，绝不阻塞游戏。
  *
- * 音效清单：
- * - tap      选中瓶子（短促高频）
- * - button   按钮点击
- * - invalid  非法操作（低频短音）
- * - pour     倒水（低通滤波白噪声）
- * - complete 完成一瓶（上行双音）
- * - win      通关（小旋律）
+ * 音效清单（素材 / 合成兜底口径）：
+ * - tap      选中瓶子（气泡点击 / 短促高频）
+ * - button   按钮点击（界面点击音 / 短音）
+ * - invalid  非法操作（界面提示音硬截 0.8s 保持简短 / 低频短音）
+ * - pour     倒水（水泡声 / 低通滤波白噪声）
+ * - complete 完成一瓶（成功提示音 / 上行双音）
+ * - win      通关（成就铃 / 小旋律）
+ * - bgm      背景音乐循环（playBgm/stopBgm，受声音开关联动）
  */
 export default class Audio {
   constructor(enabled = true) {
     this.enabled = enabled;
+    this.sfxVol = 1; // 音效音量 0~1（PRD-设置页音量调节）
+    this.bgmVol = 0.4; // 音乐音量 0~1（默认 0.4 与历史固定增益一致，升级无跳变）
     this.ctx = null; // 惰性创建
+    this._bufs = {}; // name -> AudioBuffer（素材解码完成后填充）
+    this._bgmBuf = null; // BGM 素材 buffer
+    this._bgmSrc = null; // BGM 播放源（null=未在播）
+    this._bgmGain = null; // BGM 增益节点引用（音量实时可调）
+    this._bgmWanted = false; // 业务期望 BGM 播放（开关恢复/素材就绪后据此起播）
+    this._loadAssets(); // 异步 best-effort，失败静默回落合成
   }
 
   setEnabled(v) {
     this.enabled = v;
+    if (!v) this.stopBgm();
+    else if (this._bgmWanted) this.playBgm();
+  }
+
+  /** 设置音效/音乐音量（0~1，超界裁剪）；BGM 在播时实时生效 */
+  setVolumes(sfx, bgm) {
+    this.sfxVol = Math.min(1, Math.max(0, sfx));
+    this.bgmVol = Math.min(1, Math.max(0, bgm));
+    try {
+      if (this._bgmGain) this._bgmGain.gain.value = this.bgmVol;
+    } catch (e) { /* 静默降级 */ }
   }
 
   play(name) {
     if (!this.enabled) return;
     try {
-      this._play(name);
+      const buf = this._bufs[name];
+      if (buf) this._playBuf(name, buf);
+      else this._play(name); // 素材未就绪/缺失：合成兜底
     } catch (e) {
       // 音频失败静默降级
     }
   }
 
-  _play(name) {
+  /** 素材播放：BufferSource 直出；PACE 表控制加速（playbackRate>1 缩短时长，音调相应升高） */
+  _playBuf(name, buf) {
+    const t = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf;
+    if (src.playbackRate) src.playbackRate.value = name === 'pour' ? 2 : 1; // pour 3.68s → ~1.8s
+    const g = this.ctx.createGain();
+    g.gain.value = this.sfxVol;
+    src.connect(g);
+    g.connect(this.ctx.destination);
+    src.start(t);
+  }
+
+  /** BGM：循环播放（首次触摸后由 main 调起；开关切换联动） */
+  playBgm() {
+    this._bgmWanted = true;
+    if (!this.enabled || !this._bgmBuf || this._bgmSrc) return;
+    try {
+      const ctx = this._ensureCtx();
+      const src = ctx.createBufferSource();
+      src.buffer = this._bgmBuf;
+      src.loop = true;
+      const g = ctx.createGain();
+      g.gain.value = this.bgmVol; // 音乐音量（PRD-设置页音量调节，默认 0.4 压低不盖音效）
+      src.connect(g);
+      g.connect(ctx.destination);
+      src.start(0);
+      this._bgmSrc = src;
+      this._bgmGain = g;
+    } catch (e) {
+      // 静默降级：无 BGM 不影响游戏
+    }
+  }
+
+  stopBgm() {
+    this._bgmWanted = false;
+    try {
+      if (this._bgmSrc) {
+        this._bgmSrc.stop();
+        this._bgmSrc = null;
+        this._bgmGain = null;
+      }
+    } catch (e) {
+      this._bgmSrc = null;
+      this._bgmGain = null;
+    }
+  }
+
+  /** 加载 assets/audio/ 素材（缺 getFileSystemManager / 文件 / decodeAudioData 均静默回落） */
+  _loadAssets() {
+    try {
+      if (typeof wx === 'undefined' || !wx.getFileSystemManager) return;
+      const fs = wx.getFileSystemManager();
+      ['tap', 'button', 'invalid', 'pour', 'complete', 'win'].forEach((n) => {
+        try {
+          this._decode(fs.readFileSync(`assets/audio/${n}.mp3`), (buf) => { this._bufs[n] = buf; });
+        } catch (e) { /* 单个素材缺失只影响该音效 */ }
+      });
+      this._decode(fs.readFileSync('assets/audio/bgm.mp3'), (buf) => {
+        this._bgmBuf = buf;
+        if (this._bgmWanted) this.playBgm(); // 素材晚于首次 playBgm 到位时补起播
+      });
+    } catch (e) { /* 整体回落合成 */ }
+  }
+
+  _decode(arrayBuf, cb) {
+    const ctx = this._ensureCtx();
+    if (!ctx || typeof ctx.decodeAudioData !== 'function') return;
+    let done = false;
+    const once = (buf) => { if (!done) { done = true; cb(buf); } };
+    try {
+      const p = ctx.decodeAudioData(arrayBuf, once); // 兼容回调式与 Promise 式实现
+      if (p && typeof p.then === 'function') p.then(once).catch(() => {});
+    } catch (e) { /* 解码失败回落合成 */ }
+  }
+
+  _ensureCtx() {
     if (!this.ctx) this.ctx = wx.createWebAudioContext();
+    return this.ctx;
+  }
+
+  _play(name) {
+    this._ensureCtx();
     const t = this.ctx.currentTime;
     switch (name) {
       case 'tap':
@@ -63,7 +166,7 @@ export default class Audio {
     const g = this.ctx.createGain();
     o.type = 'sine';
     o.frequency.value = freq;
-    g.gain.setValueAtTime(vol, t);
+    g.gain.setValueAtTime(vol * this.sfxVol, t);
     g.gain.exponentialRampToValueAtTime(0.001, t + dur);
     o.connect(g);
     g.connect(this.ctx.destination);
@@ -85,7 +188,7 @@ export default class Audio {
     filter.type = 'lowpass';
     filter.frequency.value = cutoff;
     const g = this.ctx.createGain();
-    g.gain.value = vol;
+    g.gain.value = vol * this.sfxVol;
     src.connect(filter);
     filter.connect(g);
     g.connect(this.ctx.destination);

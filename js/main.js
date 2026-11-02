@@ -9,7 +9,7 @@ import Audio from './render/audio.js';
 import Ads from './runtime/ads.js';
 
 const CLEARED_KEY = 'juicesort_cleared'; // 已通关关数（解锁进度）
-const SOUND_KEY = 'juicesort_sound'; // 音效开关
+const VOL_KEY = 'juicesort_volume'; // 音量设置（{sfx, bgm} 0~1，PRD-设置页音量调节；0 即关闭）
 const INTRO_KEY = 'juicesort_big_intro'; // 特殊关首进引导已读标志（R8/S-10）
 const INV_KEY = 'juicesort_inventory'; // 全局道具背包（PRD-道具背包）
 const GRANT_KEY = 'juicesort_granted'; // 首入赠送已发放标记（{[关卡号]: true}）
@@ -105,9 +105,14 @@ export default class Main {
     this.bigIntroShown = wx.getStorageSync(INTRO_KEY) === true;
     this._dbgSig = ''; // 调试状态快照签名（devtools automation 观测用）
 
-    // ---------- 音效（WebAudio 合成，开关持久化） ----------
-    this.soundOn = wx.getStorageSync(SOUND_KEY) !== false; // 默认开
-    this.audio = new Audio(this.soundOn);
+    // ---------- 音效（WebAudio，音量即开关：0 = 关闭，无独立总开关） ----------
+    const savedVol = wx.getStorageSync(VOL_KEY) || {}; // 音量（PRD-设置页音量调节，缺省音效 1 / 音乐 0.4）
+    const clampVol = (v, d) => (typeof v === 'number' && isFinite(v) ? Math.min(1, Math.max(0, v)) : d);
+    this.sfxVol = clampVol(savedVol.sfx, 1);
+    this.bgmVol = clampVol(savedVol.bgm, 0.4);
+    this._volDrag = null; // 设置页音量滑条拖动态：null | 'sfx' | 'bgm'
+    this.audio = new Audio();
+    this.audio.setVolumes(this.sfxVol, this.bgmVol);
 
     // ---------- 广告（开发模式自动降级直接发放） ----------
     this.ads = new Ads({ adUnitId: ADS_CONFIG.rewardedAdUnitId });
@@ -311,6 +316,11 @@ export default class Main {
       this._touchStart = { x: t.clientX, y: t.clientY };
       this._touchLastY = t.clientY;
       this._touchMoved = false;
+      // 首次触摸解锁 BGM（iOS WebAudio 需用户手势后起播）
+      if (!this._bgmStarted) {
+        this._bgmStarted = true;
+        this.audio.playBgm();
+      }
       // 按下态（R1）：命中检测记录 pressed，分支顺序与 onTap 一致
       this.renderer.pressed = this.renderer.hitButton(t.clientX, t.clientY, {
         scene: this.scene,
@@ -321,6 +331,14 @@ export default class Main {
         pauseOverlay: this.pauseOverlay,
         cleared: this.cleared, // 解锁进度：未解锁关卡卡片无按下态（S-04）
       });
+      // 音量滑条（PRD-设置页音量调节）：按下即定位，move 持续拖动，抬手落盘
+      if (this.scene === 'settings' && this.renderer.pressed === 'settingsSfxSlider') {
+        this._volDrag = 'sfx';
+        this._applySliderValue('sfx', t.clientX);
+      } else if (this.scene === 'settings' && this.renderer.pressed === 'settingsBgmSlider') {
+        this._volDrag = 'bgm';
+        this._applySliderValue('bgm', t.clientX);
+      }
     });
     wx.onTouchMove((e) => {
       const t = e.touches && e.touches[0];
@@ -331,12 +349,25 @@ export default class Main {
         this._touchMoved = true;
         this.renderer.pressed = null; // 位移超阈值（与 onTap 取消阈值同源）清除按下态
       }
+      // 音量滑条拖动（PRD-设置页音量调节）：实时改音量不落盘；标记已移动抑制 onTap 重放
+      if (this._volDrag && this.scene === 'settings') {
+        this._touchMoved = true;
+        this._applySliderValue(this._volDrag, t.clientX);
+        return;
+      }
       if (this.scene === 'levelSelect' && this._touchMoved) {
         this.renderer.scrollLevels(dy);
       }
     });
     wx.onTouchEnd(() => {
       this.renderer.pressed = null; // 抬手即清除按下态（onTap 派发逻辑不变）
+      // 音量滑条：按下/拖动期间已实时生效，抬手落盘并跳过 onTap（避免重复定位）
+      if (this._volDrag) {
+        this._volDrag = null;
+        this._saveVolumes();
+        this._touchStart = null;
+        return;
+      }
       if (this._touchStart && !this._touchMoved) {
         this.onTap(this._touchStart.x, this._touchStart.y);
       }
@@ -410,8 +441,6 @@ export default class Main {
       if (this.renderer.inCircle(x, y, this.renderer.backBtn)) {
         this.audio.play('button');
         this.scene = 'menu';
-      } else if (this.renderer.inRect(x, y, this.renderer.settingsSoundToggle)) {
-        this.toggleSound();
       } else if (this.renderer.inRect(x, y, this.renderer.settingsResetBtn)) {
         this.audio.play('button');
         this.resetProgress();
@@ -551,13 +580,20 @@ export default class Main {
     if (idx >= 0) this.tapBottle(idx);
   }
 
-  /** 设置页：音效开关切换（持久化） */
-  toggleSound() {
-    this.soundOn = !this.soundOn;
-    this.audio.setEnabled(this.soundOn);
-    wx.setStorageSync(SOUND_KEY, this.soundOn);
-    this.audio.play('button');
-    this.renderer.showToast(this.soundOn ? '音效已开启' : '音效已关闭');
+  /** 音量滑条（PRD-设置页音量调节）：x 坐标 → 0~1（轨道横贯热区宽度，与 renderer.drawSlider 同口径），实时生效 */
+  _applySliderValue(which, x) {
+    const r = which === 'sfx' ? this.renderer.settingsSfxSlider : this.renderer.settingsBgmSlider;
+    const v = Math.min(1, Math.max(0, (x - r.x) / r.w));
+    if (which === 'sfx') this.sfxVol = v;
+    else this.bgmVol = v;
+    this.audio.setVolumes(this.sfxVol, this.bgmVol);
+  }
+
+  /** 音量设置落盘（滑条抬手时调用；拖动过程只改内存避免频繁 IO） */
+  _saveVolumes() {
+    try {
+      wx.setStorageSync(VOL_KEY, { sfx: this.sfxVol, bgm: this.bgmVol });
+    } catch (e) { /* 存储不可用静默（不影响游戏） */ }
   }
 
   /** 清除关卡存档，解锁进度归零；特殊关引导已读标志、最佳星数纪录与首入赠送标记一并重置（AC-12；背包资产保留） */
@@ -856,6 +892,7 @@ export default class Main {
     const sig = [this.scene, this.pauseOverlay, this.levelIndex, this.selected,
       this.winPanel, this.adConfirm, this.shuffleSelecting, this.cleared,
       this.bigIntro, R.levelScroll,
+      this.sfxVol.toFixed(2), this.bgmVol.toFixed(2), // 音量变化即心跳（PRD-设置页音量调节）
       this.inv.undo, this.inv.shuffle, this.inv.addBottle, this.inv.revive,
       moves, par, stars, covers.join(','), completedCount,
       bombs.join(','), fail, timeLeft, moveLimit, failReason, genAttempts,
@@ -869,6 +906,7 @@ export default class Main {
         scene: this.scene, pause: this.pauseOverlay, level: this.levelIndex,
         sel: this.selected, win: this.winPanel, ad: this.adConfirm,
         shuf: this.shuffleSelecting, cleared: this.cleared, intro: this.bigIntro, t: now,
+        sfxVol: Math.round(this.sfxVol * 100), bgmVol: Math.round(this.bgmVol * 100), // 音量百分比（PRD-设置页音量调节）
         invUndo: this.inv.undo, invShuffle: this.inv.shuffle, invAddBottle: this.inv.addBottle,
         invRevive: this.inv.revive, // 续杯库存（PRD-限时与步数限制 F-07）
         moves, par, stars, // 三星评价：当前步数 / 关卡 par / 结算星级（非结算态 0）
@@ -894,7 +932,8 @@ export default class Main {
           add_bottle: {xy: cCircle(R.addBottleBtn), scenes: ['game']},
           revive: {xy: cCircle(R.reviveBtn), scenes: ['game']},
           restart: {xy: cCircle(R.restartBtn), scenes: ['game']},
-          sound_toggle: {xy: cRect(R.settingsSoundToggle), scenes: ['settings']},
+          settings_sfx_vol: {xy: cRect(R.settingsSfxSlider), scenes: ['settings']}, // 滑条：tap 即定位（中心=50%）
+          settings_bgm_vol: {xy: cRect(R.settingsBgmSlider), scenes: ['settings']},
           settings_reset: {xy: cRect(R.settingsResetBtn), scenes: ['settings']},
           settings_key: {xy: cRect(R.settingsKeyBtn), scenes: ['settings']},
           ad_watch: {xy: cRect(R.adConfirmWatchBtn), scenes: ['game'], when: {ad: true}},
@@ -992,7 +1031,8 @@ export default class Main {
       scene: this.scene,
       pauseOverlay: this.pauseOverlay,
       adConfirm: this.adConfirm,
-      soundOn: this.soundOn,
+      sfxVol: this.sfxVol, // 音效音量（PRD-设置页音量调节；渲染层只读显示）
+      bgmVol: this.bgmVol, // 音乐音量（PRD-设置页音量调节；渲染层只读显示）
       cleared: this.cleared,
       hasProgress: this.cleared > 0,
       inv: this.inv, // 全局道具背包（PRD-道具背包；渲染层只读显示）
