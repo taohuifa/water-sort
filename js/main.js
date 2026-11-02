@@ -533,11 +533,14 @@ export default class Main {
       return;
     }
 
-    // 倒水/飞行动画期间锁输入（抖动不影响）
-    if (this.anims.blocking()) return;
+    // 倒水动画期间锁全部输入（抖动不影响）；徽章/飞行动画仅锁按钮与打乱模式，
+    // 其他瓶可继续操作（完成瓶已 removed：命中/倒入/打乱均天然拒绝）
+    if (this.anims.activePour()) return;
+    const animBusy = this.anims.blocking();
 
-    // 打乱选瓶模式：点瓶执行打乱，再点「打乱」取消，其他区域忽略
+    // 打乱选瓶模式：点瓶执行打乱，再点「打乱」取消，其他区域忽略（动画期间保持全锁）
     if (this.shuffleSelecting) {
+      if (animBusy) return;
       if (this.renderer.inCircle(x, y, this.renderer.shuffleBtn)) {
         this.useShuffle();
         return;
@@ -547,32 +550,34 @@ export default class Main {
       return;
     }
 
-    // 底部按钮
-    if (this.renderer.inCircle(x, y, this.renderer.undoBtn)) {
-      this.audio.play('button');
-      this.undo();
-      return;
-    }
-    if (this.renderer.inCircle(x, y, this.renderer.shuffleBtn)) {
-      this.useShuffle();
-      return;
-    }
-    if (this.renderer.inCircle(x, y, this.renderer.addBottleBtn)) {
-      this.useAddBottle();
-      return;
-    }
-    if (this.renderer.inCircle(x, y, this.renderer.reviveBtn)) {
-      // 续杯在局内仅作库存展示（消耗入口在失败弹窗，PRD-限时与步数限制 F-10）
-      this.audio.play('button');
-      this.renderer.showToast(
-        canConsume(this.inv, 'revive') ? '失败后点「续杯 · 继续」消耗' : '续杯不足：失败弹窗可看广告补充'
-      );
-      return;
-    }
-    if (this.renderer.inCircle(x, y, this.renderer.restartBtn)) {
-      this.audio.play('button');
-      this.beginLevelLoad(this.levelIndex);
-      return;
+    // 底部按钮（徽章/飞行动画期间仍全锁：undo 回滚会与在飞成品状态错乱）
+    if (!animBusy) {
+      if (this.renderer.inCircle(x, y, this.renderer.undoBtn)) {
+        this.audio.play('button');
+        this.undo();
+        return;
+      }
+      if (this.renderer.inCircle(x, y, this.renderer.shuffleBtn)) {
+        this.useShuffle();
+        return;
+      }
+      if (this.renderer.inCircle(x, y, this.renderer.addBottleBtn)) {
+        this.useAddBottle();
+        return;
+      }
+      if (this.renderer.inCircle(x, y, this.renderer.reviveBtn)) {
+        // 续杯在局内仅作库存展示（消耗入口在失败弹窗，PRD-限时与步数限制 F-10）
+        this.audio.play('button');
+        this.renderer.showToast(
+          canConsume(this.inv, 'revive') ? '失败后点「续杯 · 继续」消耗' : '续杯不足：失败弹窗可看广告补充'
+        );
+        return;
+      }
+      if (this.renderer.inCircle(x, y, this.renderer.restartBtn)) {
+        this.audio.play('button');
+        this.beginLevelLoad(this.levelIndex);
+        return;
+      }
     }
 
     // 瓶子
@@ -757,7 +762,7 @@ export default class Main {
       x0: rect.x + rect.w / 2,
       y0: rect.y + rect.h * 0.4,
       onDone: () => {
-        this.renderer.displayedCompleted = this.logic.completed.length;
+        this.renderer.displayedCompleted++; // 并发飞行按落地逐个 +1（输入解锁后多瓶飞行可并存）
       },
     });
   }

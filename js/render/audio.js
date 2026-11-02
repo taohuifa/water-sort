@@ -16,7 +16,7 @@
  * 由 skill 脚本 `analyze-sfx.mjs` 按各音效实际发声段 RMS 对齐目标响度 0.15 计算得出，
  * 含峰值保护（增益后 Peak ≤ 0.9）。素材更换/裁剪参数变化后需重跑脚本刷新此表。
  */
-const GAINS = { button: 2, complete: 0.25, invalid: 0.7, pour: 1.45, tap: 1.2, win: 1.15 }; // 2026-11-02 人工调音台定稿（analyze-sfx 公式打底 + gen-sfx-tuner 用户拖杆微调）
+const GAINS = { bgm: 0.4, button: 2, complete: 0.25, invalid: 0.7, pour: 2, tap: 1.2, win: 1.15 }; // 2026-11-02 人工调音台定稿（analyze-sfx 公式打底 + gen-sfx-tuner 用户拖杆微调）；bgm 与 bgmVol 相乘
 
 export default class Audio {
   constructor(enabled = true) {
@@ -50,6 +50,7 @@ export default class Audio {
   play(name) {
     if (!this.enabled) return;
     try {
+      this._ensureCtx(); // 每次播放前检查，真机 suspended/default 时顺带 resume
       const buf = this._bufs[name];
       if (buf) this._playBuf(name, buf);
       else this._play(name); // 素材未就绪/缺失：合成兜底
@@ -90,7 +91,7 @@ export default class Audio {
       src.buffer = this._bgmBuf;
       src.loop = true;
       const g = ctx.createGain();
-      g.gain.value = this.bgmVol; // 音乐音量（PRD-设置页音量调节，默认 0.4 压低不盖音效）
+      g.gain.value = this.bgmVol * (GAINS.bgm || 1); // 音乐音量（bgmVol x 响度增益，默认 0.4 压低不盖音效）
       src.connect(g);
       g.connect(ctx.destination);
       src.start(0);
@@ -137,14 +138,20 @@ export default class Audio {
     if (!ctx || typeof ctx.decodeAudioData !== 'function') return;
     let done = false;
     const once = (buf) => { if (!done) { done = true; cb(buf); } };
+    const fail = () => {}; // 解码失败静默回落合成音
     try {
-      const p = ctx.decodeAudioData(arrayBuf, once); // 兼容回调式与 Promise 式实现
-      if (p && typeof p.then === 'function') p.then(once).catch(() => {});
+      const p = ctx.decodeAudioData(arrayBuf, once, fail); // 兼容回调式与 Promise 式实现
+      if (p && typeof p.then === 'function') p.then(once).catch(fail);
     } catch (e) { /* 解码失败回落合成 */ }
   }
 
   _ensureCtx() {
     if (!this.ctx) this.ctx = wx.createWebAudioContext();
+    // 真机必须 resume 才出声；注意 wx 的状态值不是标准 suspended/running（实测 Android 报 'default'），
+    // 所以条件放宽为「非 running 即尝试 resume」（重复 resume 无副作用）
+    try {
+      if (this.ctx.state !== 'running' && typeof this.ctx.resume === 'function') this.ctx.resume();
+    } catch (e) { /* 静默降级 */ }
     return this.ctx;
   }
 

@@ -1036,6 +1036,77 @@ check('满瓶完成徽章链：满色瓶停留 ✓ 徽章 → 徽章结束后才
   assert.ok(logic.isWin(), '按路径重放应通关');
 });
 
+check('D-02 完成动画期间：其他瓶可继续操作，完成瓶不可再选中，按钮仍全锁', () => {
+  // 求 L1 一条解路径（复用上方 DFS 思路），tap 重放至首次完成并停在徽章阶段
+  main.loadLevel(0);
+  const visited2 = new Set();
+  const path2 = [];
+  const dfs2 = () => {
+    if (logic.isWin()) return true;
+    const key = JSON.stringify(logic.bottles);
+    if (visited2.has(key)) return false;
+    visited2.add(key);
+    for (let from = 0; from < logic.bottles.length; from++) {
+      for (let to = 0; to < logic.bottles.length; to++) {
+        if (from === to || logic.canPour(from, to) === 0) continue;
+        logic.pour(from, to);
+        path2.push([from, to]);
+        if (dfs2()) return true;
+        path2.pop();
+        logic.undo();
+      }
+    }
+    return false;
+  };
+  assert.ok(dfs2(), 'L1 应可解');
+
+  main.loadLevel(0);
+  let doneTo = -1;
+  for (const [from, to] of path2) {
+    const doneBefore = logic.completed.length;
+    const p1 = center(renderer.bottleRect(from));
+    const p2 = center(renderer.bottleRect(to));
+    tap(p1.x, p1.y);
+    tap(p2.x, p2.y);
+    for (let i = 0; i < 30 && !anims.allDone(); i++) anims.update(1 / 60); // pour 完 → 徽章入场
+    if (logic.completed.length > doneBefore) {
+      doneTo = to;
+      break;
+    }
+    fastForward();
+  }
+  assert.ok(doneTo >= 0, '重放应触发一次完成');
+  assert.ok(anims.badgeOf(doneTo), '应停在完成瓶徽章阶段');
+  assert.ok(anims.blocking(), '徽章/飞行阶段道具按钮口径仍为全锁');
+
+  // ① 完成瓶不可再选中（removed：命中即跳过）
+  const pDone = center(renderer.bottleRect(doneTo));
+  tap(pDone.x, pDone.y);
+  assert.notStrictEqual(main.selected, doneTo, '完成瓶不可再选中');
+
+  // ② 其他瓶可正常选中并倒水（徽章动画不阻塞）
+  const other = logic.bottles.findIndex((b, i) => !logic.removed.has(i) && b.length > 0);
+  assert.ok(other >= 0 && other !== doneTo, '场上应存在其他非空瓶');
+  const pOther = center(renderer.bottleRect(other));
+  tap(pOther.x, pOther.y);
+  assert.strictEqual(main.selected, other, '徽章阶段应可选中其他瓶');
+  let target = -1;
+  for (let to = 0; to < logic.bottles.length; to++) {
+    if (to !== other && logic.canPour(other, to) > 0) {
+      target = to;
+      break;
+    }
+  }
+  assert.ok(target >= 0, '其他瓶应存在合法倒水目标');
+  const moves = logic.moveCount;
+  const pTarget = center(renderer.bottleRect(target));
+  tap(pTarget.x, pTarget.y);
+  assert.strictEqual(logic.moveCount, moves + 1, '徽章阶段倒水应生效');
+  fastForward();
+  main.loadLevel(0); // 清场，避免残留动画影响后续用例
+  finishLoading();
+});
+
 check('R1 按下态生命周期：命中记录 / 抬手清 / 位移超阈值清 / onCancel 清 / onTap 派发零改动（AC-08/AC-09）', () => {
   main.loadLevel(0);
   main.scene = 'game';

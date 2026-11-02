@@ -25,7 +25,7 @@ let initGains = {};
 if (gainsIdx >= 0) { try { initGains = JSON.parse(argv[gainsIdx + 1]); } catch (e) { console.error('ERR: --gains 不是合法 JSON'); process.exit(1); } }
 const dir = resolve(argv[0] && !argv[0].startsWith('--') ? argv[0] : './assets/audio');
 
-const files = readdirSync(dir).filter((f) => f.endsWith('.mp3') && f !== 'bgm.mp3');
+const files = readdirSync(dir).filter((f) => f.endsWith('.mp3')); // 含 bgm（BGM 行为：循环播放，播放中点击=停止）
 if (!files.length) { console.error(`ERR: ${dir} 下没有音效 mp3`); process.exit(1); }
 
 const dataJs = files
@@ -48,8 +48,8 @@ h3{margin-bottom:4px}#tip{color:#666;font-size:14px}
 </style></head>
 <body>
 <h2>音效音量调音台</h2>
-<p id="tip">拖动滑杆调音量（游戏内播出口径：pour 为 0.9s 起 2x 速 0.38s 截断）→ 点播放试听 →
-勾「循环」可反复听 → 调好后点底部按钮，复制文本框内容发给 AI。</p>
+<p id="tip">拖动滑杆调音量（游戏内播出口径：pour 为 0.9s 起 2x 速 0.38s 截断；bgm 为循环播放，播放中再点一次停止）→ 点播放试听 →
+勾「循环」可反复听音效 → 调好后点底部按钮，复制文本框内容发给 AI。</p>
 <label class="rep"><input type="checkbox" id="rep"> 循环播放（选中音效反复播）</label>
 <div id="rows"></div>
 <button style="font-size:18px;padding:12px 24px" onclick="genCfg()">生成 GAINS 配置</button>
@@ -70,9 +70,14 @@ async function ensure(name) {
   }
   return bufs[name];
 }
-function stop(name) { try { if (srcs[name]) { srcs[name].onended = null; srcs[name].stop(); } } catch (e) {} srcs[name] = null; }
+function stop(name) {
+  try { if (srcs[name]) { srcs[name].onended = null; srcs[name].stop(); } } catch (e) {}
+  srcs[name] = null;
+  if (name === 'bgm') { const b = document.querySelector('button[onclick="play(\\'bgm\\')"]'); if (b) b.textContent = '▶ bgm'; }
+}
 async function play(name) {
   const buf = await ensure(name);
+  if (name === 'bgm' && srcs[name]) { stop(name); return; } // BGM：播放中点击=停止
   stop(name);
   const t = ctx.currentTime;
   const src = ctx.createBufferSource();
@@ -80,10 +85,21 @@ async function play(name) {
   const g = ctx.createGain();
   g.gain.value = gains[name];
   src.connect(g); g.connect(ctx.destination);
-  if (name === 'pour') { src.playbackRate.value = 2; src.start(t, 0.9); src.stop(t + 0.38); }
-  else src.start(t);
+  if (name === 'bgm') {
+    src.loop = true; // BGM 循环播
+    src.start(t);
+    document.querySelector('button[onclick="play(\\'bgm\\')"]').textContent = '■ bgm';
+  } else if (name === 'pour') {
+    src.playbackRate.value = 2; src.start(t, 0.9); src.stop(t + 0.38);
+  } else {
+    src.start(t);
+  }
   srcs[name] = src;
-  src.onended = () => { srcs[name] = null; if (document.getElementById('rep').checked) play(name); };
+  src.onended = () => {
+    srcs[name] = null;
+    if (name === 'bgm') document.querySelector('button[onclick="play(\\'bgm\\')"]').textContent = '▶ bgm';
+    else if (document.getElementById('rep').checked) play(name);
+  };
 }
 function genCfg() {
   const out = {};
