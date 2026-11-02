@@ -5,12 +5,19 @@
  * 音效清单（素材 / 合成兜底口径）：
  * - tap      选中瓶子（气泡点击 / 短促高频）
  * - button   按钮点击（界面点击音 / 短音）
- * - invalid  非法操作（界面提示音硬截 0.8s 保持简短 / 低频短音）
- * - pour     倒水（水泡声 / 低通滤波白噪声）
+ * - invalid  非法操作（界面提示音 / 低频短音）
+ * - pour     倒水（倒水入罐声 1.2s 响亮段起播 · 2x 加速 · 2x 增益 · 0.38s 与动画同步 / 低通滤波白噪声）
  * - complete 完成一瓶（成功提示音 / 上行双音）
  * - win      通关（成就铃 / 小旋律）
  * - bgm      背景音乐循环（playBgm/stopBgm，受声音开关联动）
  */
+/**
+ * 响度归一增益表（静态配置，离线生成，零运行时开销）：
+ * 由 skill 脚本 `analyze-sfx.mjs` 按各音效实际发声段 RMS 对齐目标响度 0.15 计算得出，
+ * 含峰值保护（增益后 Peak ≤ 0.9）。素材更换/裁剪参数变化后需重跑脚本刷新此表。
+ */
+const GAINS = { button: 2, complete: 0.25, invalid: 0.7, pour: 1.45, tap: 1.2, win: 1.15 }; // 2026-11-02 人工调音台定稿（analyze-sfx 公式打底 + gen-sfx-tuner 用户拖杆微调）
+
 export default class Audio {
   constructor(enabled = true) {
     this.enabled = enabled;
@@ -51,14 +58,23 @@ export default class Audio {
     }
   }
 
-  /** 素材播放：BufferSource 直出；PACE 表控制加速（playbackRate>1 缩短时长，音调相应升高） */
+  /** 素材播放：BufferSource 直出；pour 与倒水动画（anims.js addPour dur=0.38s）严格同步；音量 = sfxVol x 响度归一增益 */
   _playBuf(name, buf) {
     const t = this.ctx.currentTime;
     const src = this.ctx.createBufferSource();
     src.buffer = buf;
-    if (src.playbackRate) src.playbackRate.value = name === 'pour' ? 2 : 1; // pour 3.68s → ~1.8s
     const g = this.ctx.createGain();
-    g.gain.value = this.sfxVol;
+    if (name === 'pour') {
+      // 从 0.9s 响亮段起播（试听选定，素材前 0.9s 为安静起手）+ 2x 加速 + 0.38s 与动画同步；不淡出
+      if (src.playbackRate) src.playbackRate.value = 2;
+      g.gain.value = this.sfxVol * (GAINS[name] || 1);
+      src.connect(g);
+      g.connect(this.ctx.destination);
+      src.start(t, 0.9);
+      src.stop(t + 0.38);
+      return;
+    }
+    g.gain.value = this.sfxVol * (GAINS[name] || 1);
     src.connect(g);
     g.connect(this.ctx.destination);
     src.start(t);
